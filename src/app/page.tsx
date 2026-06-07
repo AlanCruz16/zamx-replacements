@@ -1,65 +1,144 @@
-import Image from 'next/image';
+'use client';
 
-export default function Home() {
+import { useQuery } from 'convex/react';
+import { api } from '../../convex/_generated/api';
+import Navbar from '@/components/layout/Navbar';
+import { BotMessageSquare, Wrench, Clock, FileText } from 'lucide-react';
+
+export default function Dashboard() {
+  const user = useQuery(api.users.current);
+
+  // Still loading Convex data
+  if (user === undefined) {
+    return (
+      <div className="min-h-screen flex flex-col bg-[var(--background)]">
+        <Navbar />
+        <main className="flex-1 flex items-center justify-center">
+          <div className="animate-pulse flex flex-col items-center gap-4">
+            <div className="w-12 h-12 rounded-full bg-gray-200 dark:bg-gray-800"></div>
+            <div className="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded"></div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // Not logged in (middleware protects it, but just in case)
+  if (user === null) {
+    return null;
+  }
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
+    <div className="min-h-screen flex flex-col bg-[var(--background)] selection:bg-[var(--color-brand-blue)] selection:text-white">
+      <Navbar />
+
+      <main className="flex-1 flex flex-col items-center pt-16 md:pt-24 px-4 pb-32">
+        {/* Welcome Section */}
+        <div
+          className="text-center space-y-4 mb-12 opacity-0"
+          style={{ animation: 'fadeIn 0.6s ease-out forwards' }}
+        >
+          <div className="mx-auto w-16 h-16 bg-[var(--color-brand-blue)]/10 text-[var(--color-brand-blue)] rounded-2xl flex items-center justify-center mb-6 shadow-sm border border-[var(--color-brand-blue)]/20">
+            <BotMessageSquare size={32} />
+          </div>
+          <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-white">
+            {user.preferredLanguage === 'es' ? 'Hola,' : 'Hello,'}{' '}
+            <span className="text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]">
+              {user.fullName.split(' ')[0]}
+            </span>
           </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{' '}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{' '}
-            or the{' '}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{' '}
-            center.
+          <p className="text-lg md:text-xl text-gray-500 dark:text-gray-400 max-w-xl font-medium">
+            {user.preferredLanguage === 'es'
+              ? '¿En qué te puedo ayudar hoy con tus reemplazos ZIEHL-ABEGG?'
+              : 'How can I help you today with your ZIEHL-ABEGG replacements?'}
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* Quick Action Chips */}
+        <div
+          className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl w-full opacity-0"
+          style={{ animation: 'fadeIn 0.6s ease-out 0.2s forwards' }}
+        >
+          <button className="flex flex-col items-start p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-[#111111]/50 backdrop-blur-sm hover:border-[var(--color-brand-blue)]/50 hover:shadow-lg transition-all duration-300 text-left group">
+            <Wrench className="text-gray-400 group-hover:text-[var(--color-brand-blue)] mb-3 transition-colors" />
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+              {user.preferredLanguage === 'es' ? 'Cotizar serie GR' : 'Quote GR series'}
+            </h3>
+            <p className="text-sm text-gray-500 mt-1 leading-relaxed">
+              {user.preferredLanguage === 'es'
+                ? 'Ingresa el modelo para un reemplazo exacto.'
+                : 'Enter the model for an exact replacement.'}
+            </p>
+          </button>
+          <button className="flex flex-col items-start p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-[#111111]/50 backdrop-blur-sm hover:border-[var(--color-brand-blue)]/50 hover:shadow-lg transition-all duration-300 text-left group">
+            <Clock className="text-gray-400 group-hover:text-[var(--color-brand-blue)] mb-3 transition-colors" />
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+              {user.preferredLanguage === 'es' ? 'Tiempos de entrega' : 'Delivery times'}
+            </h3>
+            <p className="text-sm text-gray-500 mt-1 leading-relaxed">
+              {user.preferredLanguage === 'es'
+                ? 'Verifica disponibilidad por temporada.'
+                : 'Check availability by season.'}
+            </p>
+          </button>
+          <button className="flex flex-col items-start p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-[#111111]/50 backdrop-blur-sm hover:border-[var(--color-brand-blue)]/50 hover:shadow-lg transition-all duration-300 text-left group">
+            <FileText className="text-gray-400 group-hover:text-[var(--color-brand-blue)] mb-3 transition-colors" />
+            <h3 className="font-semibold text-gray-900 dark:text-gray-100">
+              {user.preferredLanguage === 'es' ? 'Ver cotizaciones' : 'View quotes'}
+            </h3>
+            <p className="text-sm text-gray-500 mt-1 leading-relaxed">
+              {user.preferredLanguage === 'es'
+                ? 'Historial de solicitudes en PDF.'
+                : 'PDF request history.'}
+            </p>
+          </button>
         </div>
       </main>
+
+      {/* Floating Input Placeholder */}
+      <div
+        className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[var(--background)] via-[var(--background)] to-transparent pt-20 pb-8 px-4 pointer-events-none opacity-0"
+        style={{ animation: 'fadeIn 0.6s ease-out 0.4s forwards' }}
+      >
+        <div className="max-w-3xl mx-auto pointer-events-auto relative">
+          <div className="relative flex items-center group">
+            <div className="absolute inset-y-0 left-5 flex items-center pointer-events-none text-gray-400 group-focus-within:text-[var(--color-brand-blue)] transition-colors">
+              <BotMessageSquare size={22} />
+            </div>
+            <input
+              type="text"
+              placeholder={
+                user.preferredLanguage === 'es'
+                  ? 'Escribe un modelo o número de parte...'
+                  : 'Type a model or part number...'
+              }
+              className="w-full pl-14 pr-16 py-4 rounded-3xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-[#111111]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-blue)]/50 focus:border-transparent text-gray-900 dark:text-gray-100 transition-all text-[16px] md:text-lg"
+              disabled
+            />
+            <div className="absolute inset-y-0 right-2 flex items-center">
+              <button className="p-2.5 bg-[var(--color-brand-blue)] hover:bg-[var(--color-brand-light)] text-white rounded-full transition-colors cursor-not-allowed opacity-50 shadow-md">
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="22" y1="2" x2="11" y2="13"></line>
+                  <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <p className="text-center text-xs text-gray-400 mt-4 font-medium tracking-wide">
+            ZAMX Replacements MVP v0.1 •{' '}
+            {user.preferredLanguage === 'es' ? 'IA en construcción 🚧' : 'AI under construction 🚧'}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
