@@ -19,3 +19,20 @@ Convex agent skills for common tasks can be installed by running
 `npx convex ai-files install`.
 
 <!-- convex-ai-end -->
+
+<!-- ai-sdk-start -->
+
+## AI SDK v6 (Vercel AI SDK)
+
+This project uses `ai@6.x` and `@ai-sdk/react@3.x` which have **major breaking changes** from v4/v5. Your training data is almost certainly outdated.
+
+**Before writing any `useChat`, `streamText`, `tool()`, or message-handling code, read `AI_SDK_V6_GUIDE.md` first.** Key gotchas:
+
+- `toTextStreamResponse()` → `toUIMessageStreamResponse()`
+- `useChat({ api, body })` → `useChat({ transport: new DefaultChatTransport({ api, body }) })`
+- `sendMessage({ role, content })` → `sendMessage({ text })`
+- `parameters:` → `inputSchema:` in tool definitions
+- `maxSteps` → `stopWhen: stepCountIs(N)`
+- Messages use `parts[]` not `content`
+
+<!-- ai-sdk-end -->

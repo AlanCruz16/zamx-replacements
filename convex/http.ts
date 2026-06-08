@@ -26,7 +26,8 @@ http.route({
       }) as Record<string, unknown>;
 
       if (evt.type === 'user.created' || evt.type === 'user.updated') {
-        const { id, first_name, last_name, email_addresses } = evt.data;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { id, first_name, last_name, email_addresses } = evt.data as any;
         const fullName = [first_name, last_name].filter(Boolean).join(' ');
         const email =
           email_addresses && email_addresses.length > 0 ? email_addresses[0].email_address : '';

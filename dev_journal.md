@@ -22,7 +22,16 @@
 - Corrección de bucle infinito en React estabilizando los hooks de Clerk y Convex en `ConvexClientProvider`.
 - **Fase 1 completada con éxito.**
 
-## Siguiente Paso: Fase 2 (Chatbot)
+## Fase 2: Chatbot (Gemini)
 
-- Integrar Vercel AI SDK y el modelo Gemini.
-- Desarrollar interfaz del chat y flujo conversacional.
+- Integración exitosa de Vercel AI SDK (`ai`, `@ai-sdk/google`, `zod`).
+- Creación del endpoint `api/chat/route.ts` con System Prompt estricto.
+- Implementación de `useChat` en el Frontend con diseño de chat y Burbujas.
+- Creación de Tool `submit_quote_request` validado en Zod.
+- **Fase 2 completada con éxito.**
+
+## Siguiente Paso: Fase 3 (Cálculo y Base de Datos)
+
+- Interceptar la ejecución de `submit_quote_request`.
+- Algoritmo aleatorio de precios basado en prefijos de modelo.
+- Guardar historial en Convex.
