@@ -1,6 +1,13 @@
 import { streamText, tool, convertToModelMessages, type UIMessage, stepCountIs } from 'ai';
 import { google } from '@ai-sdk/google';
 import { z } from 'zod';
+import { ConvexHttpClient } from 'convex/browser';
+import { api } from '../../../../convex/_generated/api';
+import { Resend } from 'resend';
+import { QuoteRequestTemplate } from '@/emails/QuoteRequestTemplate';
+
+const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Configura el tiempo máximo de espera para la API (útil en Edge)
 export const maxDuration = 30;
@@ -9,6 +16,7 @@ export async function POST(req: Request) {
   const { messages, data } = await req.json();
   const userName = data?.userName || 'Cliente';
   const language = data?.language || 'es';
+  const clerkId = data?.clerkId;
 
   const systemPrompt = `
 Eres un asistente experto en ventas y cotizaciones de ZIEHL-ABEGG México.
@@ -35,7 +43,7 @@ INSTRUCCIONES CLAVE:
   const coreMessages = await convertToModelMessages(messages as UIMessage[]);
 
   const result = streamText({
-    model: google('gemini-2.5-flash'),
+    model: google('gemini-3.1-flash-lite'),
     system: systemPrompt,
     messages: coreMessages,
     tools: {
@@ -57,13 +65,60 @@ INSTRUCCIONES CLAVE:
             .min(1),
         }),
         execute: async ({ products }) => {
-          // Por ahora (MVP Fase 2), solo simulamos que procesamos la cotización y regresamos un ACK.
-          // En la Fase 3, interceptaremos este llamado para calcular precios y guardar en Convex.
-          return {
-            success: true,
-            message: 'Datos recibidos correctamente en el backend. Cotización en proceso.',
-            extractedProducts: products,
-          };
+          console.log("=== EJECUTANDO TOOL submit_quote_request ===");
+          console.log("CLERK ID:", clerkId);
+          console.log("PRODUCTS:", products);
+
+          if (!clerkId) {
+            console.log("ERROR: clerkId is undefined");
+            return {
+              success: false,
+              message: "Error: No se encontró la sesión del usuario (clerkId faltante).",
+            };
+          }
+
+          try {
+            // 1. Guardar la cotización en Convex
+            const result = await convex.mutation(api.quotes.create, {
+              clerkId,
+              products,
+            });
+
+            // 2. Enviar el email con Resend
+            try {
+              await resend.emails.send({
+                from: 'ZIEHL-ABEGG Reemplazos <onboarding@resend.dev>',
+                to: ['adagocd@gmail.com'], // Enviar al correo del administrador
+                subject: `Nueva solicitud de cotización: ${result.requestId}`,
+                react: QuoteRequestTemplate({
+                  requestId: result.requestId,
+                  userName,
+                  products: result.products || products, // Fallback to raw products if convex didn't return them (update below)
+                  subtotalUSD: result.subtotalUSD,
+                  taxUSD: result.taxUSD,
+                  totalUSD: result.totalUSD,
+                }) as React.ReactElement,
+              });
+              console.log("Email sent successfully via Resend");
+            } catch (emailError) {
+              console.error("Error enviando el email con Resend:", emailError);
+              // We don't fail the chat if the email fails
+            }
+
+            return {
+              success: true,
+              message: 'Datos recibidos y cotización generada exitosamente.',
+              quoteId: result.quoteId,
+              requestId: result.requestId,
+              totalUSD: result.totalUSD,
+            };
+          } catch (error) {
+            console.error("Error al procesar la cotización en Convex:", error);
+            return {
+              success: false,
+              message: "Hubo un error al procesar tu solicitud en nuestro sistema. Por favor intenta de nuevo.",
+            };
+          }
         },
       }),
     },

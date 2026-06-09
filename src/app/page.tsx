@@ -10,16 +10,23 @@ import { useEffect, useRef, useState } from 'react';
 
 export default function Dashboard() {
   const user = useQuery(api.users.current);
+  const userRef = useRef(user);
 
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  // eslint-disable-next-line react-hooks/refs
   const { messages, status, sendMessage } = useChat({
     transport: new DefaultChatTransport({
       api: '/api/chat',
-      body: {
+      body: () => ({
         data: {
-          userName: user?.fullName,
-          language: user?.preferredLanguage,
+          userName: userRef.current?.fullName,
+          language: userRef.current?.preferredLanguage,
+          clerkId: userRef.current?.clerkId,
         },
-      },
+      }),
     }),
     onError: (error) => {
       console.error('useChat onError:', error);
@@ -187,6 +194,7 @@ export default function Dashboard() {
                         {JSON.stringify(
                           (
                             m.parts.find(
+                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
                               (p: any) => p.type?.startsWith('tool-') || p.type === 'dynamic-tool'
                             ) as any
                           )?.input,
