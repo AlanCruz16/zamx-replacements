@@ -1,4 +1,4 @@
-import { mutation } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
@@ -97,3 +97,116 @@ export const create = mutation({
     };
   },
 });
+
+export const processEmployeeResponse = mutation({
+  args: {
+    requestId: v.string(),
+    classification: v.string(),
+    explanation: v.string(),
+    newPricesUSD: v.optional(
+      v.array(
+        v.object({
+          partNumber: v.string(),
+          price: v.number(),
+        })
+      )
+    ),
+    newDeliveryWeeks: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    // 1. Find the quote by requestId
+    const quote = await ctx.db
+      .query("quotes")
+      .filter((q) => q.eq(q.field("requestId"), args.requestId))
+      .first();
+
+    if (!quote) {
+      throw new Error(`Cotización no encontrada para el request: ${args.requestId}`);
+    }
+
+    // 2. Update products if modified
+    let updatedProducts = quote.products;
+    let newSubtotal = quote.subtotalUSD;
+    let newTax = quote.taxUSD;
+    let newTotal = quote.totalUSD;
+
+    if (args.classification === "modified") {
+      newSubtotal = 0;
+      updatedProducts = quote.products.map((p: any) => {
+        let finalPrice = p.pricePerUnitUSD;
+        let finalWeeks = p.deliveryWeeks;
+
+        // Apply new price if provided
+        if (args.newPricesUSD) {
+          const match = args.newPricesUSD.find((np) => np.partNumber === p.partNumber);
+          if (match) {
+            finalPrice = match.price;
+          }
+        }
+
+        // Apply new delivery weeks if provided
+        if (args.newDeliveryWeeks !== undefined) {
+          finalWeeks = args.newDeliveryWeeks;
+        }
+
+        newSubtotal += finalPrice * p.quantity;
+
+        return {
+          ...p,
+          pricePerUnitUSD: finalPrice,
+          deliveryWeeks: finalWeeks,
+        };
+      });
+
+      newTax = newSubtotal * 0.16;
+      newTotal = newSubtotal + newTax;
+    }
+
+    // 3. Determine the final status based on classification
+    let newStatus = quote.status;
+    switch (args.classification) {
+      case "approved":
+        newStatus = "employee_approved";
+        break;
+      case "modified":
+        newStatus = "employee_modified";
+        break;
+      case "oem_exclusive":
+        newStatus = "oem_exclusive";
+        break;
+      case "obsolete":
+        newStatus = "obsolete";
+        break;
+      case "needs_info":
+        newStatus = "needs_info";
+        break;
+      default:
+        newStatus = "pending_review";
+        break;
+    }
+
+    // 4. Update the quote
+    await ctx.db.patch(quote._id, {
+      status: newStatus,
+      products: updatedProducts,
+      subtotalUSD: newSubtotal,
+      taxUSD: newTax,
+      totalUSD: newTotal,
+      // We store the explanation in a new field so the dashboard can display it
+      employeeExplanation: args.explanation,
+    });
+
+    return { success: true, quoteId: quote._id, status: newStatus };
+  },
+});
+
+export const getByRequestId = query({
+  args: { requestId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("quotes")
+      .filter((q) => q.eq(q.field("requestId"), args.requestId))
+      .first();
+  },
+});
+

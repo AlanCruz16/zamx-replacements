@@ -89,11 +89,12 @@ INSTRUCCIONES CLAVE:
               await resend.emails.send({
                 from: 'ZIEHL-ABEGG Reemplazos <onboarding@resend.dev>',
                 to: ['adagocd@gmail.com'], // Enviar al correo del administrador
-                subject: `Nueva solicitud de cotización: ${result.requestId}`,
+                reply_to: process.env.IMAP_USER,
+                subject: `Nueva solicitud de cotización: [${result.requestId}]`,
                 react: QuoteRequestTemplate({
                   requestId: result.requestId,
                   userName,
-                  products: result.products || products, // Fallback to raw products if convex didn't return them (update below)
+                  products: result.products || products,
                   subtotalUSD: result.subtotalUSD,
                   taxUSD: result.taxUSD,
                   totalUSD: result.totalUSD,

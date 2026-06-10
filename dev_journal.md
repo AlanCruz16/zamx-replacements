@@ -30,8 +30,20 @@
 - Creación de Tool `submit_quote_request` validado en Zod.
 - **Fase 2 completada con éxito.**
 
-## Siguiente Paso: Fase 3 (Cálculo y Base de Datos)
+## Fase 3: Cálculo, Base de Datos y Notificaciones (Email)
 
-- Interceptar la ejecución de `submit_quote_request`.
-- Algoritmo aleatorio de precios basado en prefijos de modelo.
-- Guardar historial en Convex.
+- Se interceptó la ejecución de la herramienta `submit_quote_request`.
+- Se implementó un algoritmo aleatorio de precios y tiempos de entrega en Convex (`quotes:create`) basado en reglas de prefijos y temporalidad guardadas en BD mediante un script semilla (`init.ts`).
+- Se guardó el resultado del cálculo en la tabla `quotes` de Convex vinculando el `clerkId` del cliente.
+- Se integró la librería `resend` en la ruta `/api/chat/route.ts` de Next.js para enviar notificaciones automáticas al equipo de ventas.
+- Se implementó una plantilla visual con `@react-email/components` (`QuoteRequestTemplate.tsx`).
+- Se crearon rutas para pruebas manuales (`/api/test-email`).
+- Solución de stale closures en `useChat` pasando el payload de usuario mediante ref reactivo (`userRef.current`).
+- **Fase 3 completada con éxito.**
+
+## Siguiente Paso: Fase 4 (Recepción de Respuestas del Empleado)
+
+- Configurar buzón de correo y conexión IMAP (`imapflow`).
+- Crear un Cron Job (`/api/cron/check-email`) para leer correos nuevos.
+- Integrar Gemini para leer el cuerpo del correo e interpretar la decisión del vendedor.
+- Actualizar el estado de la cotización en Convex (aprobado, modificado, etc.).

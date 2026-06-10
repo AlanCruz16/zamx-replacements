@@ -45,10 +45,15 @@ export default defineSchema({
     totalUSD: v.number(),
     status: v.union(
       v.literal('pending_review'),
-      v.literal('approved'),
-      v.literal('rejected'),
-      v.literal('sent_to_customer')
+      v.literal('employee_approved'),
+      v.literal('employee_modified'),
+      v.literal('oem_exclusive'),
+      v.literal('obsolete'),
+      v.literal('needs_info'),
+      v.literal('sent_to_customer'),
+      v.literal('rejected')
     ),
+    employeeExplanation: v.optional(v.string()),
     pdfStorageId: v.optional(v.id('_storage')),
     expiresAt: v.number(),
   })
