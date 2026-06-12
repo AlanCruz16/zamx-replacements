@@ -3,6 +3,7 @@
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import Navbar from '@/components/layout/Navbar';
+import { GooeyText } from '@/components/ui/gooey-text-morphing';
 import { BotMessageSquare, Wrench, Clock, Send, User, Loader2 } from 'lucide-react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
@@ -91,20 +92,29 @@ export default function Dashboard() {
               className="text-center space-y-4 mb-12 opacity-0"
               style={{ animation: 'fadeIn 0.6s ease-out forwards' }}
             >
-              <div className="mx-auto w-16 h-16 bg-[var(--color-brand-blue)]/10 text-[var(--color-brand-blue)] rounded-2xl flex items-center justify-center mb-6 shadow-sm border border-[var(--color-brand-blue)]/20">
-                <BotMessageSquare size={32} />
-              </div>
-              <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-white">
+              <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-white mb-2">
                 {isEs ? 'Hola,' : 'Hello,'}{' '}
                 <span className="text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]">
                   {user.fullName.split(' ')[0]}
                 </span>
               </h1>
-              <p className="text-lg md:text-xl text-gray-500 dark:text-gray-400 max-w-xl font-medium">
-                {isEs
-                  ? '¿En qué te puedo ayudar hoy con tus reemplazos ZIEHL-ABEGG?'
-                  : 'How can I help you today with your ZIEHL-ABEGG replacements?'}
-              </p>
+
+              <div className="flex flex-col items-center justify-center pt-2">
+                <p className="text-xl md:text-2xl text-gray-600 dark:text-gray-300 font-medium">
+                  {isEs ? 'Cotiza aquí tu' : 'Quote here your'}
+                </p>
+                <div className="h-[80px] md:h-[100px] flex items-center justify-center w-full -mt-2">
+                  <GooeyText
+                    texts={isEs
+                      ? ["ventilador", "reemplazo", "refacción", "equipo"]
+                      : ["fan", "replacement", "spare part", "equipment"]}
+                    morphTime={1}
+                    cooldownTime={0.60}
+                    className="font-bold w-full"
+                    textClassName="text-4xl md:text-5xl text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]"
+                  />
+                </div>
+              </div>
             </div>
 
             {/* Quick Action Chips */}
@@ -170,10 +180,9 @@ export default function Dashboard() {
 
                 <div
                   className={`max-w-[85%] rounded-2xl px-5 py-3.5 text-[15px] md:text-[16px] leading-relaxed shadow-sm
-                    ${
-                      m.role === 'user'
-                        ? 'bg-[var(--color-brand-blue)] text-white'
-                        : 'bg-white dark:bg-[#111111] border border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200'
+                    ${m.role === 'user'
+                      ? 'bg-[var(--color-brand-blue)] text-white'
+                      : 'bg-white dark:bg-[#111111] border border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200'
                     }`}
                 >
                   {/* Handling tool invocations */}

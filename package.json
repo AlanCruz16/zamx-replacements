@@ -16,6 +16,7 @@
     "@react-email/components": "^1.0.12",
     "@react-pdf/renderer": "^4.5.1",
     "ai": "^6.0.197",
+    "clsx": "^2.1.1",
     "convex": "^1.40.0",
     "imapflow": "^1.4.0",
     "lucide-react": "^1.17.0",
@@ -26,6 +27,7 @@
     "react-email": "^6.5.0",
     "resend": "^6.12.4",
     "svix": "^1.95.1",
+    "tailwind-merge": "^3.6.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

@@ -92,20 +92,13 @@ export async function GET() {
 
         // Generar y enviar PDF si el empleado autorizó o modificó
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        if (
-          finalClassification === 'employee_approved' ||
-          finalClassification === 'employee_modified' ||
-          finalClassification === 'approved' ||
-          finalClassification === 'modified'
-        ) {
+        if (finalClassification === 'employee_approved' || finalClassification === 'employee_modified' || finalClassification === 'approved' || finalClassification === 'modified') {
           await fetch(`${baseUrl}/api/send-client-quote`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ quoteId: msg.requestId }),
           }).catch((e) => console.error('Error trigger PDF:', e));
-        } else if (
-          ['oem_exclusive', 'obsolete', 'needs_info', 'rejected'].includes(finalClassification)
-        ) {
+        } else if (['oem_exclusive', 'obsolete', 'needs_info', 'rejected'].includes(finalClassification)) {
           // Enviar correo de rechazo si el empleado declinó la cotización
           await fetch(`${baseUrl}/api/send-rejection-email`, {
             method: 'POST',
@@ -113,7 +106,7 @@ export async function GET() {
             body: JSON.stringify({
               quoteId: msg.requestId,
               status: finalClassification,
-              explanation: interpretation.explanation,
+              explanation: interpretation.explanation
             }),
           }).catch((e) => console.error('Error trigger Rejection Email:', e));
         }
@@ -147,7 +140,7 @@ export async function GET() {
     } finally {
       try {
         await markClient.logout();
-      } catch {}
+      } catch (e) { }
     }
   }
 
