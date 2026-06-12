@@ -55,6 +55,7 @@ export default defineSchema({
     ),
     employeeExplanation: v.optional(v.string()),
     pdfStorageId: v.optional(v.id('_storage')),
+    sentToClientAt: v.optional(v.number()),
     expiresAt: v.number(),
   })
     .index('by_user_id', ['userId'])

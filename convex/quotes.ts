@@ -1,6 +1,5 @@
-import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
-import { Id } from "./_generated/dataModel";
+import { mutation, query } from './_generated/server';
+import { v } from 'convex/values';
 
 export const create = mutation({
   args: {
@@ -17,17 +16,17 @@ export const create = mutation({
   handler: async (ctx, args) => {
     // 1. Get the user from clerkId
     const user = await ctx.db
-      .query("users")
-      .withIndex("by_clerk_id", (q) => q.eq("clerkId", args.clerkId))
+      .query('users')
+      .withIndex('by_clerk_id', (q) => q.eq('clerkId', args.clerkId))
       .unique();
 
     if (!user) {
-      throw new Error("Usuario no encontrado en la base de datos.");
+      throw new Error('Usuario no encontrado en la base de datos.');
     }
 
     // 2. Fetch all pricing rules and delivery seasons to memory (small tables)
-    const pricingRules = await ctx.db.query("pricing_rules").collect();
-    const deliverySeasons = await ctx.db.query("delivery_seasons").collect();
+    const pricingRules = await ctx.db.query('pricing_rules').collect();
+    const deliverySeasons = await ctx.db.query('delivery_seasons').collect();
 
     // Determine current month (1-12)
     const currentMonth = new Date().getMonth() + 1;
@@ -45,12 +44,15 @@ export const create = mutation({
     const processedProducts = args.products.map((product) => {
       // Find matching pricing rule by prefix (e.g. MK, ZN, RH)
       let pricePerUnitUSD = 0;
-      
-      const rule = pricingRules.find((r) => product.model.toUpperCase().startsWith(r.prefix.toUpperCase()) && r.isActive);
-      
+
+      const rule = pricingRules.find(
+        (r) => product.model.toUpperCase().startsWith(r.prefix.toUpperCase()) && r.isActive
+      );
+
       if (rule) {
         // Random price between min and max for simulation purposes
-        pricePerUnitUSD = Math.floor(Math.random() * (rule.maxPriceUSD - rule.minPriceUSD + 1)) + rule.minPriceUSD;
+        pricePerUnitUSD =
+          Math.floor(Math.random() * (rule.maxPriceUSD - rule.minPriceUSD + 1)) + rule.minPriceUSD;
       } else {
         // Fallback price if no rule matches
         pricePerUnitUSD = 1000;
@@ -70,20 +72,20 @@ export const create = mutation({
 
     const taxUSD = subtotalUSD * 0.16; // 16% IVA in Mexico
     const totalUSD = subtotalUSD + taxUSD;
-    
+
     // Generate a friendly Request ID
     const requestId = `REQ-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
     const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 30; // 30 days from now
 
     // 4. Save to database
-    const quoteId = await ctx.db.insert("quotes", {
+    const quoteId = await ctx.db.insert('quotes', {
       userId: user._id,
       requestId,
       products: processedProducts,
       subtotalUSD,
       taxUSD,
       totalUSD,
-      status: "pending_review",
+      status: 'pending_review',
       expiresAt,
     });
 
@@ -116,8 +118,8 @@ export const processEmployeeResponse = mutation({
   handler: async (ctx, args) => {
     // 1. Find the quote by requestId
     const quote = await ctx.db
-      .query("quotes")
-      .filter((q) => q.eq(q.field("requestId"), args.requestId))
+      .query('quotes')
+      .filter((q) => q.eq(q.field('requestId'), args.requestId))
       .first();
 
     if (!quote) {
@@ -130,8 +132,9 @@ export const processEmployeeResponse = mutation({
     let newTax = quote.taxUSD;
     let newTotal = quote.totalUSD;
 
-    if (args.classification === "modified") {
+    if (args.classification === 'modified') {
       newSubtotal = 0;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       updatedProducts = quote.products.map((p: any) => {
         let finalPrice = p.pricePerUnitUSD;
         let finalWeeks = p.deliveryWeeks;
@@ -165,23 +168,23 @@ export const processEmployeeResponse = mutation({
     // 3. Determine the final status based on classification
     let newStatus = quote.status;
     switch (args.classification) {
-      case "approved":
-        newStatus = "employee_approved";
+      case 'approved':
+        newStatus = 'employee_approved';
         break;
-      case "modified":
-        newStatus = "employee_modified";
+      case 'modified':
+        newStatus = 'employee_modified';
         break;
-      case "oem_exclusive":
-        newStatus = "oem_exclusive";
+      case 'oem_exclusive':
+        newStatus = 'oem_exclusive';
         break;
-      case "obsolete":
-        newStatus = "obsolete";
+      case 'obsolete':
+        newStatus = 'obsolete';
         break;
-      case "needs_info":
-        newStatus = "needs_info";
+      case 'needs_info':
+        newStatus = 'needs_info';
         break;
       default:
-        newStatus = "pending_review";
+        newStatus = 'pending_review';
         break;
     }
 
@@ -204,9 +207,64 @@ export const getByRequestId = query({
   args: { requestId: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db
-      .query("quotes")
-      .filter((q) => q.eq(q.field("requestId"), args.requestId))
+      .query('quotes')
+      .withIndex('by_request_id', (q) => q.eq('requestId', args.requestId))
       .first();
   },
 });
 
+export const markAsSentToClient = mutation({
+  args: { quoteId: v.id('quotes') },
+  handler: async (ctx, args) => {
+    const quote = await ctx.db.get(args.quoteId);
+    if (!quote) throw new Error('Cotización no encontrada');
+
+    await ctx.db.patch(args.quoteId, {
+      sentToClientAt: Date.now(),
+    });
+  },
+});
+export const getFullQuoteDetails = query({
+  args: { requestId: v.string() },
+  handler: async (ctx, args) => {
+    const quote = await ctx.db
+      .query('quotes')
+      .withIndex('by_request_id', (q) => q.eq('requestId', args.requestId))
+      .first();
+
+    if (!quote) return null;
+
+    const user = await ctx.db.get(quote.userId);
+    if (!user) return null;
+
+    // ... previous content ...
+    return { quote, user };
+  },
+});
+
+export const getUserQuotes = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error('No autenticado');
+    }
+
+    const user = await ctx.db
+      .query('users')
+      .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
+      .unique();
+
+    if (!user) {
+      throw new Error('Usuario no encontrado');
+    }
+
+    const quotes = await ctx.db
+      .query('quotes')
+      .withIndex('by_user_id', (q) => q.eq('userId', user._id))
+      .order('desc')
+      .collect();
+
+    return quotes;
+  },
+});

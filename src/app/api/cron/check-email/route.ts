@@ -10,9 +10,12 @@ export const dynamic = 'force-dynamic';
 
 const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
-export async function GET(req: Request) {
+export async function GET() {
   if (!process.env.IMAP_HOST || !process.env.IMAP_USER || !process.env.IMAP_PASSWORD) {
-    return NextResponse.json({ success: false, error: "Credenciales IMAP no configuradas" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: 'Credenciales IMAP no configuradas' },
+      { status: 500 }
+    );
   }
 
   const client = new ImapFlow({
@@ -27,6 +30,7 @@ export async function GET(req: Request) {
   });
 
   const messagesToProcess: { uid: number; requestId: string; textBody: string }[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const results: any[] = [];
 
   try {
@@ -42,7 +46,7 @@ export async function GET(req: Request) {
           messagesToProcess.push({
             uid: message.uid,
             requestId: reqMatch[1].toUpperCase(),
-            textBody: parsed.text || ''
+            textBody: parsed.text || '',
           });
         }
       }
@@ -50,38 +54,53 @@ export async function GET(req: Request) {
       lock.release();
     }
   } catch (err) {
-    console.error("Error fetching IMAP:", err);
+    console.error('Error fetching IMAP:', err);
     return NextResponse.json({ success: false, error: String(err) }, { status: 500 });
   } finally {
-    try { await client.logout(); } catch (e) {} // Ignorar si ya se cerró
+    try {
+      await client.logout();
+    } catch {
+      // Ignorar si no se puede cerrar
+    }
   }
 
   // 2. Procesar con Gemini sin mantener el socket IMAP abierto (evita Timeouts)
   const successfulUids: number[] = [];
-  
+
   for (const msg of messagesToProcess) {
     console.log(`Procesando email recibido para ${msg.requestId}`);
     try {
       const quote = await convex.query(api.quotes.getByRequestId, { requestId: msg.requestId });
       if (quote) {
-         const interpretation = await parseEmployeeResponse(quote, msg.textBody);
-         let finalClassification = interpretation.classification;
-         if (interpretation.confidence < 0.7) {
-           finalClassification = 'pending_review' as any;
-         }
-         
-         await convex.mutation(api.quotes.processEmployeeResponse, {
-            requestId: msg.requestId,
-            classification: finalClassification,
-            explanation: interpretation.explanation,
-            newPricesUSD: interpretation.newPricesUSD,
-            newDeliveryWeeks: interpretation.newDeliveryWeeks,
-         });
-         
-         results.push({ requestId: msg.requestId, status: finalClassification });
-         successfulUids.push(msg.uid);
+        const interpretation = await parseEmployeeResponse(quote, msg.textBody);
+        let finalClassification = interpretation.classification;
+        if (interpretation.confidence < 0.7) {
+          finalClassification = 'pending_review';
+        }
+
+        await convex.mutation(api.quotes.processEmployeeResponse, {
+          requestId: msg.requestId,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          classification: finalClassification as any,
+          explanation: interpretation.explanation,
+          newPricesUSD: interpretation.newPricesUSD,
+          newDeliveryWeeks: interpretation.newDeliveryWeeks,
+        });
+
+        results.push({ requestId: msg.requestId, status: finalClassification });
+        successfulUids.push(msg.uid);
+
+        // Generar y enviar PDF si el empleado autorizó o modificó
+        if (finalClassification === 'approved' || finalClassification === 'modified') {
+          const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+          await fetch(`${baseUrl}/api/send-client-quote`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ quoteId: msg.requestId }),
+          }).catch((e) => console.error('Error trigger PDF:', e));
+        }
       } else {
-         console.log(`Cotización ${msg.requestId} no encontrada.`);
+        console.log(`Cotización ${msg.requestId} no encontrada.`);
       }
     } catch (e) {
       console.error(`Error procesando con Gemini el REQ ${msg.requestId}:`, e);
@@ -106,9 +125,11 @@ export async function GET(req: Request) {
         lock.release();
       }
     } catch (e) {
-      console.error("Error marcando como leído:", e);
+      console.error('Error marcando como leído:', e);
     } finally {
-      try { await markClient.logout(); } catch (e) {}
+      try {
+        await markClient.logout();
+      } catch (e) {}
     }
   }
 
