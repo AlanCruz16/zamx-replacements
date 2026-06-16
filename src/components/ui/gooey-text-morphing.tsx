@@ -1,7 +1,7 @@
-"use client";
+'use client';
 
-import * as React from "react";
-import { cn } from "@/lib/utils";
+import * as React from 'react';
+import { cn } from '@/lib/utils';
 
 interface GooeyTextProps {
   texts: string[];
@@ -16,7 +16,7 @@ export function GooeyText({
   morphTime = 1,
   cooldownTime = 0.25,
   className,
-  textClassName
+  textClassName,
 }: GooeyTextProps) {
   const text1Ref = React.useRef<HTMLSpanElement>(null);
   const text2Ref = React.useRef<HTMLSpanElement>(null);
@@ -41,10 +41,10 @@ export function GooeyText({
     const doCooldown = () => {
       morph = 0;
       if (text1Ref.current && text2Ref.current) {
-        text2Ref.current.style.filter = "";
-        text2Ref.current.style.opacity = "100%";
-        text1Ref.current.style.filter = "";
-        text1Ref.current.style.opacity = "0%";
+        text2Ref.current.style.filter = '';
+        text2Ref.current.style.opacity = '100%';
+        text1Ref.current.style.filter = '';
+        text1Ref.current.style.opacity = '0%';
       }
     };
 
@@ -61,12 +61,17 @@ export function GooeyText({
       setMorph(fraction);
     };
 
+    let animationFrameId: number;
+
     function animate() {
-      requestAnimationFrame(animate);
+      animationFrameId = requestAnimationFrame(animate);
       const newTime = new Date();
       const shouldIncrementIndex = cooldown > 0;
-      const dt = (newTime.getTime() - time.getTime()) / 1000;
+      let dt = (newTime.getTime() - time.getTime()) / 1000;
       time = newTime;
+
+      // Cap dt to prevent erratic behavior when switching tabs
+      if (dt > 0.1) dt = 0.016;
 
       cooldown -= dt;
 
@@ -87,12 +92,12 @@ export function GooeyText({
     animate();
 
     return () => {
-      // Cleanup function if needed
+      cancelAnimationFrame(animationFrameId);
     };
   }, [texts, morphTime, cooldownTime]);
 
   return (
-    <div className={cn("relative", className)}>
+    <div className={cn('relative', className)}>
       <svg className="absolute h-0 w-0" aria-hidden="true" focusable="false">
         <defs>
           <filter id="threshold" x="-20%" y="-20%" width="140%" height="140%">
@@ -110,21 +115,21 @@ export function GooeyText({
 
       <div
         className="w-full h-full flex items-center justify-center"
-        style={{ filter: "url(#threshold)" }}
+        style={{ filter: 'url(#threshold)' }}
       >
         <span
           ref={text1Ref}
           className={cn(
-            "absolute inline-block select-none text-center whitespace-nowrap text-6xl md:text-[60pt]",
-            "text-foreground",
+            'absolute inline-block select-none text-center whitespace-nowrap text-6xl md:text-[60pt]',
+            'text-foreground',
             textClassName
           )}
         />
         <span
           ref={text2Ref}
           className={cn(
-            "absolute inline-block select-none text-center whitespace-nowrap text-6xl md:text-[60pt]",
-            "text-foreground",
+            'absolute inline-block select-none text-center whitespace-nowrap text-6xl md:text-[60pt]',
+            'text-foreground',
             textClassName
           )}
         />

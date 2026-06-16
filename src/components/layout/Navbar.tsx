@@ -4,7 +4,8 @@ import { UserButton } from '@clerk/nextjs';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { useState } from 'react';
-import { FileText } from 'lucide-react';
+import { FileText, Globe, Home } from 'lucide-react';
+import { ExpandableTabs, TabItem } from '@/components/ui/expandable-tabs';
 import QuotesModal from './QuotesModal';
 
 export default function Navbar() {
@@ -18,41 +19,44 @@ export default function Navbar() {
     updateLanguage({ language: newLang });
   };
 
+  const tabs: TabItem[] = [
+    { title: 'Inicio', icon: Home },
+    { type: 'separator' },
+    { title: user?.preferredLanguage === 'es' ? 'ES / en' : 'es / EN', icon: Globe },
+    { type: 'separator' },
+    { title: 'Mis Cotizaciones', icon: FileText },
+  ];
+
+  const handleTabChange = (index: number | null) => {
+    if (index === 0) {
+      window.location.href = '/';
+    } else if (index === 2) {
+      toggleLanguage();
+    } else if (index === 4) {
+      setIsQuotesModalOpen(true);
+    }
+  };
+
   return (
     <>
       <header className="sticky top-0 z-50 w-full bg-white/70 dark:bg-[#0a0a0a]/70 backdrop-blur-md border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm transition-all duration-300">
         <div className="mx-auto max-w-5xl px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {/* Temporary Logo Placeholder */}
-            <div className="w-8 h-8 rounded bg-[var(--color-brand-blue)] text-white flex items-center justify-center font-bold text-lg shadow-inner">
-              Z
-            </div>
-            <span className="font-semibold text-lg tracking-tight text-[var(--color-brand-blue)] dark:text-white">
-              ZIEHL-ABEGG
-              <span className="text-gray-400 font-light ml-1 text-sm hidden sm:inline-block">
-                Replacements
-              </span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/favicon.svg" alt="ZIEHL-ABEGG Logo" className="w-8 h-8 object-contain" />
+            <span className="text-4xl leading-none ml-1" title="México">
+              🇲🇽
             </span>
           </div>
 
           <div className="flex items-center gap-4">
             {user && (
-              <>
-                <button
-                  onClick={toggleLanguage}
-                  className="text-xs font-semibold text-gray-500 dark:text-gray-400 hover:text-[var(--color-brand-blue)] transition-colors px-3 py-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
-                >
-                  {user.preferredLanguage === 'es' ? 'ES / en' : 'es / EN'}
-                </button>
-                <button
-                  onClick={() => setIsQuotesModalOpen(true)}
-                  className="flex items-center gap-1.5 text-sm font-semibold text-gray-600 dark:text-gray-300 hover:text-[var(--color-brand-blue)] transition-colors px-3 py-1.5 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 border border-transparent"
-                  title="Mis Cotizaciones"
-                >
-                  <FileText size={16} />
-                  <span className="hidden sm:inline-block">Mis Cotizaciones</span>
-                </button>
-              </>
+              <ExpandableTabs
+                tabs={tabs}
+                onChange={handleTabChange}
+                activeColor="text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]"
+                className="border-gray-200/50 dark:border-gray-800/50 bg-white/50 dark:bg-[#111111]/50 backdrop-blur-sm"
+              />
             )}
             <div className="h-8 w-8 rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-gray-100 dark:bg-gray-800">
               <UserButton afterSignOutUrl="/" />

@@ -42,8 +42,8 @@ export async function POST(req: Request) {
 
     // 3. Enviar el correo usando Resend (sin PDF)
     const { data: resendData, error } = await resend.emails.send({
-      from: 'ZAMX Cotizaciones <onboarding@resend.dev>', // Cambiar en prod a @ziehl-abegg.com.mx
-      to: ['adagocd@gmail.com'], // Forzado para pruebas
+      from: 'ZAMX Cotizaciones <cotizaciones@za.idcn.com.mx>', // Cambiar en prod a @ziehl-abegg.com.mx
+      to: [user.email], // Se envía al correo registrado por el cliente
       subject: `Actualización sobre su solicitud ZAMX-Q-${quote.quoteNumber || quoteId}`,
       html: emailHtml,
     });

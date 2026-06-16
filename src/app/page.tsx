@@ -4,6 +4,7 @@ import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import Navbar from '@/components/layout/Navbar';
 import { GooeyText } from '@/components/ui/gooey-text-morphing';
+import { DottedSurface } from '@/components/ui/dotted-surface';
 import { BotMessageSquare, Wrench, Clock, Send, User, Loader2 } from 'lucide-react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
@@ -17,17 +18,20 @@ export default function Dashboard() {
     userRef.current = user;
   }, [user]);
 
-  // eslint-disable-next-line react-hooks/refs
   const { messages, status, sendMessage } = useChat({
+    // eslint-disable-next-line react-hooks/refs
     transport: new DefaultChatTransport({
       api: '/api/chat',
-      body: () => ({
-        data: {
-          userName: userRef.current?.fullName,
-          language: userRef.current?.preferredLanguage,
-          clerkId: userRef.current?.clerkId,
-        },
-      }),
+      body: () => {
+        const current = userRef.current;
+        return {
+          data: {
+            userName: current?.fullName,
+            language: current?.preferredLanguage,
+            clerkId: current?.clerkId,
+          },
+        };
+      },
     }),
     onError: (error) => {
       console.error('useChat onError:', error);
@@ -81,7 +85,8 @@ export default function Dashboard() {
   const isEs = user.preferredLanguage === 'es';
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--background)] selection:bg-[var(--color-brand-blue)] selection:text-white">
+    <div className="min-h-screen flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0">
+      <DottedSurface className="opacity-50 dark:opacity-30" />
       <Navbar />
 
       <main className="flex-1 flex flex-col pt-4 md:pt-8 px-4 pb-36 max-w-4xl mx-auto w-full">
@@ -105,11 +110,13 @@ export default function Dashboard() {
                 </p>
                 <div className="h-[80px] md:h-[100px] flex items-center justify-center w-full -mt-2">
                   <GooeyText
-                    texts={isEs
-                      ? ["ventilador", "reemplazo", "refacción", "equipo"]
-                      : ["fan", "replacement", "spare part", "equipment"]}
+                    texts={
+                      isEs
+                        ? ['ventilador', 'reemplazo', 'refacción', 'equipo']
+                        : ['fan', 'replacement', 'spare part', 'equipment']
+                    }
                     morphTime={1}
-                    cooldownTime={0.60}
+                    cooldownTime={0.6}
                     className="font-bold w-full"
                     textClassName="text-4xl md:text-5xl text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]"
                   />
@@ -180,15 +187,16 @@ export default function Dashboard() {
 
                 <div
                   className={`max-w-[85%] rounded-2xl px-5 py-3.5 text-[15px] md:text-[16px] leading-relaxed shadow-sm
-                    ${m.role === 'user'
-                      ? 'bg-[var(--color-brand-blue)] text-white'
-                      : 'bg-white dark:bg-[#111111] border border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200'
+                    ${
+                      m.role === 'user'
+                        ? 'bg-[var(--color-brand-blue)] text-white'
+                        : 'bg-white dark:bg-[#111111] border border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200'
                     }`}
                 >
                   {/* Handling tool invocations */}
-                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                   {m.parts.some(
-                    (p: any) => p.type?.startsWith('tool-') || p.type === 'dynamic-tool'
+                    (p: { type?: string }) =>
+                      p.type?.startsWith('tool-') || p.type === 'dynamic-tool'
                   ) ? (
                     <div className="flex flex-col gap-3">
                       <div className="flex items-center gap-2 text-[var(--color-brand-light)] font-semibold border-b border-gray-100 dark:border-gray-800 pb-2">
@@ -199,12 +207,13 @@ export default function Dashboard() {
                         {isEs ? 'Datos enviados a ZIEHL-ABEGG:' : 'Data sent to ZIEHL-ABEGG:'}
                       </div>
                       <pre className="text-xs bg-gray-50 dark:bg-black/50 p-3 rounded-xl overflow-x-auto text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 shadow-inner">
-                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                        {}
                         {JSON.stringify(
                           (
                             m.parts.find(
+                              (p: { type?: string }) =>
+                                p.type?.startsWith('tool-') || p.type === 'dynamic-tool'
                               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                              (p: any) => p.type?.startsWith('tool-') || p.type === 'dynamic-tool'
                             ) as any
                           )?.input,
                           null,
@@ -215,8 +224,7 @@ export default function Dashboard() {
                   ) : (
                     <p className="whitespace-pre-wrap">
                       {m.parts
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        .filter((p: any) => p.type === 'text')
+                        .filter((p: { type?: string }) => p.type === 'text')
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         .map((p: any) => p.text)
                         .join('')}

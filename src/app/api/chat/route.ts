@@ -65,15 +65,15 @@ INSTRUCCIONES CLAVE:
             .min(1),
         }),
         execute: async ({ products }) => {
-          console.log("=== EJECUTANDO TOOL submit_quote_request ===");
-          console.log("CLERK ID:", clerkId);
-          console.log("PRODUCTS:", products);
+          console.log('=== EJECUTANDO TOOL submit_quote_request ===');
+          console.log('CLERK ID:', clerkId);
+          console.log('PRODUCTS:', products);
 
           if (!clerkId) {
-            console.log("ERROR: clerkId is undefined");
+            console.log('ERROR: clerkId is undefined');
             return {
               success: false,
-              message: "Error: No se encontró la sesión del usuario (clerkId faltante).",
+              message: 'Error: No se encontró la sesión del usuario (clerkId faltante).',
             };
           }
 
@@ -87,9 +87,9 @@ INSTRUCCIONES CLAVE:
             // 2. Enviar el email con Resend
             try {
               await resend.emails.send({
-                from: 'ZIEHL-ABEGG Reemplazos <onboarding@resend.dev>',
-                to: ['adagocd@gmail.com'], // Enviar al correo del administrador
-                reply_to: process.env.IMAP_USER,
+                from: 'ZAMX Soporte <soporte@za.idcn.com.mx>',
+                to: ['alancengineer@outlook.com'], // Enviar al correo del administrador
+                replyTo: process.env.IMAP_USER as string,
                 subject: `Nueva solicitud de cotización: [${result.requestId}]`,
                 react: QuoteRequestTemplate({
                   requestId: result.requestId,
@@ -100,9 +100,9 @@ INSTRUCCIONES CLAVE:
                   totalUSD: result.totalUSD,
                 }) as React.ReactElement,
               });
-              console.log("Email sent successfully via Resend");
+              console.log('Email sent successfully via Resend');
             } catch (emailError) {
-              console.error("Error enviando el email con Resend:", emailError);
+              console.error('Error enviando el email con Resend:', emailError);
               // We don't fail the chat if the email fails
             }
 
@@ -114,10 +114,11 @@ INSTRUCCIONES CLAVE:
               totalUSD: result.totalUSD,
             };
           } catch (error) {
-            console.error("Error al procesar la cotización en Convex:", error);
+            console.error('Error al procesar la cotización en Convex:', error);
             return {
               success: false,
-              message: "Hubo un error al procesar tu solicitud en nuestro sistema. Por favor intenta de nuevo.",
+              message:
+                'Hubo un error al procesar tu solicitud en nuestro sistema. Por favor intenta de nuevo.',
             };
           }
         },
