@@ -8,15 +8,24 @@ import { DottedSurface } from '@/components/ui/dotted-surface';
 import { BotMessageSquare, Wrench, Clock, Send, User, Loader2 } from 'lucide-react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
+import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
 export default function Dashboard() {
   const user = useQuery(api.users.current);
   const userRef = useRef(user);
+  const router = useRouter();
 
   useEffect(() => {
     userRef.current = user;
   }, [user]);
+
+  // Onboarding loop check
+  useEffect(() => {
+    if (user && user.companyName === 'Pendiente') {
+      router.push('/onboarding');
+    }
+  }, [user, router]);
 
   const { messages, status, sendMessage } = useChat({
     // eslint-disable-next-line react-hooks/refs

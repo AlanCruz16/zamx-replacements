@@ -11,7 +11,7 @@ const formatCurrency = (value: number) => {
 
 const styles = StyleSheet.create({
   page: {
-    padding: 30,
+    padding: 20,
     fontFamily: 'Helvetica',
     fontSize: 9,
     color: '#333333',
@@ -132,11 +132,11 @@ const styles = StyleSheet.create({
   footer: {
     borderTopWidth: 1,
     borderTopColor: '#DDDDDD',
-    paddingTop: 10,
-    lineHeight: 1.4,
+    paddingTop: 5,
+    lineHeight: 1.2,
   },
   signatureName: {
-    marginTop: 15,
+    marginTop: 5,
     fontFamily: 'Helvetica-Bold',
   },
   automatedNote: {
@@ -198,6 +198,7 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
       <Page size="A4" style={styles.page}>
         {/* TOP LOGO */}
         <View style={styles.topLogoContainer}>
+          {/* eslint-disable-next-line jsx-a11y/alt-text */}
           <Image src={logoUrl} style={styles.logo} />
         </View>
 
@@ -311,7 +312,7 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
         <View style={styles.footer}>
           <Text>Nuestra oferta no es obligatoria y está sujeta a cualquier cambio.</Text>
           <Text>Le pedimos referirse a la oferta mencionada al momento de enviar la orden.</Text>
-          <Text style={{ marginTop: 10 }}>
+          <Text style={{ marginTop: 5 }}>
             Si está interesado en proceder con la compra, por favor envíe un correo a{' '}
             {employeeEmail}
           </Text>
