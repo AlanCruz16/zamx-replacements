@@ -11,15 +11,15 @@ const formatCurrency = (value: number) => {
 
 const styles = StyleSheet.create({
   page: {
-    padding: 40,
+    padding: 30,
     fontFamily: 'Helvetica',
-    fontSize: 10,
+    fontSize: 9,
     color: '#333333',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 15,
   },
   leftHeader: {
     width: '45%',
@@ -29,8 +29,8 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   topLogoContainer: {
-    alignItems: 'flex-end',
-    marginBottom: 15,
+    alignItems: 'center',
+    marginBottom: 10,
   },
   logo: {
     width: 160,
@@ -55,43 +55,42 @@ const styles = StyleSheet.create({
   metaData: {
     marginTop: 10,
     lineHeight: 1.4,
-    textAlign: 'right',
   },
   metaRow: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
   },
   metaLabel: {
-    width: 80,
-    textAlign: 'right',
+    width: 90,
+    textAlign: 'left',
     marginRight: 5,
   },
   metaValue: {
-    width: 180,
+    width: 170,
     textAlign: 'left',
   },
   dateBanner: {
     backgroundColor: '#F0F0F0',
-    padding: 10,
+    padding: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 20,
+    marginBottom: 15,
   },
   greeting: {
-    marginBottom: 20,
-    lineHeight: 1.5,
+    marginBottom: 15,
+    lineHeight: 1.4,
   },
   validUntilBanner: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginBottom: 20,
+    marginBottom: 15,
   },
   validLabel: {
     marginRight: 20,
   },
   table: {
     width: '100%',
-    marginBottom: 20,
+    marginBottom: 15,
   },
   tableHeader: {
     flexDirection: 'row',
@@ -112,12 +111,12 @@ const styles = StyleSheet.create({
   colTotal: { width: '20%', textAlign: 'right' },
   deliveryText: {
     fontFamily: 'Helvetica-Bold',
-    marginBottom: 20,
+    marginBottom: 15,
   },
   totalsContainer: {
     width: '50%',
     alignSelf: 'flex-end',
-    marginBottom: 40,
+    marginBottom: 20,
   },
   totalRow: {
     flexDirection: 'row',
@@ -137,14 +136,13 @@ const styles = StyleSheet.create({
     lineHeight: 1.4,
   },
   signatureName: {
-    marginTop: 20,
+    marginTop: 15,
     fontFamily: 'Helvetica-Bold',
   },
   automatedNote: {
     fontSize: 8,
     color: '#888888',
-    marginTop: 5,
-    marginBottom: 20,
+    marginBottom: 2,
   },
   confidential: {
     fontSize: 8,
@@ -207,10 +205,10 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
         <View style={styles.header}>
           <View style={styles.leftHeader}>
             <Text style={styles.smallGrayText}>
-              ZIEHL-ABEGG Inc. | 4971 Millennium Drive | Winston-Salem NC 27107
+              ZIEHL-ABEGG MEXICO | San Pedro Garza García, NL, México
             </Text>
             <View style={styles.customerData}>
-              <Text style={styles.compactText}>Purchaser:</Text>
+              <Text style={styles.compactText}>Cliente:</Text>
               <Text style={styles.compactText}>{clientInfo.companyName}</Text>
               <Text style={styles.compactText}>{clientInfo.fullName}</Text>
               <Text style={styles.compactText}>{clientInfo.deliveryLocation}</Text>
@@ -222,10 +220,6 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
             <Text style={styles.title}>COTIZACIÓN</Text>
 
             <View style={styles.metaData}>
-              <View style={styles.metaRow}>
-                <Text style={styles.metaLabel}>página:</Text>
-                <Text style={styles.metaValue}>1 | 1</Text>
-              </View>
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>n° de cotización:</Text>
                 <Text style={styles.metaValue}>{quoteId}</Text>
@@ -317,9 +311,13 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
         <View style={styles.footer}>
           <Text>Nuestra oferta no es obligatoria y está sujeta a cualquier cambio.</Text>
           <Text>Le pedimos referirse a la oferta mencionada al momento de enviar la orden.</Text>
+          <Text style={{ marginTop: 10 }}>
+            Si está interesado en proceder con la compra, por favor envíe un correo a{' '}
+            {employeeEmail}
+          </Text>
 
-          <Text style={{ marginTop: 20 }}>Atentamente</Text>
-          <Text>ZIEHL-ABEGG Inc.</Text>
+          <Text style={{ marginTop: 15 }}>Atentamente</Text>
+          <Text>ZIEHL-ABEGG MEXICO</Text>
 
           <Text style={styles.signatureName}>{employeeName}</Text>
           <Text style={styles.automatedNote}>
