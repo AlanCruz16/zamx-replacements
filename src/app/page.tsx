@@ -193,43 +193,102 @@ export default function Dashboard() {
                         : 'bg-white dark:bg-[#111111] border border-gray-200 dark:border-gray-800 text-gray-800 dark:text-gray-200'
                     }`}
                 >
-                  {/* Handling tool invocations */}
-                  {m.parts.some(
-                    (p: { type?: string }) =>
-                      p.type?.startsWith('tool-') || p.type === 'dynamic-tool'
-                  ) ? (
-                    <div className="flex flex-col gap-3">
-                      <div className="flex items-center gap-2 text-[var(--color-brand-light)] font-semibold border-b border-gray-100 dark:border-gray-800 pb-2">
-                        <Loader2 className="animate-spin" size={16} />
-                        {isEs ? 'Procesando Cotización...' : 'Processing Quote...'}
-                      </div>
-                      <div className="text-sm font-medium text-gray-500">
-                        {isEs ? 'Datos enviados a ZIEHL-ABEGG:' : 'Data sent to ZIEHL-ABEGG:'}
-                      </div>
-                      <pre className="text-xs bg-gray-50 dark:bg-black/50 p-3 rounded-xl overflow-x-auto text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 shadow-inner">
-                        {}
-                        {JSON.stringify(
-                          (
-                            m.parts.find(
-                              (p: { type?: string }) =>
-                                p.type?.startsWith('tool-') || p.type === 'dynamic-tool'
-                              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                            ) as any
-                          )?.input,
-                          null,
-                          2
-                        )}
-                      </pre>
-                    </div>
-                  ) : (
-                    <p className="whitespace-pre-wrap">
-                      {m.parts
-                        .filter((p: { type?: string }) => p.type === 'text')
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        .map((p: any) => p.text)
-                        .join('')}
-                    </p>
-                  )}
+                  {/* Handling message parts */}
+                  {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                  {m.parts.map((part: any, index: number) => {
+                    if (part.type === 'text') {
+                      return (
+                        <p key={index} className="whitespace-pre-wrap">
+                          {part.text}
+                        </p>
+                      );
+                    }
+
+                    if (part.type?.startsWith('tool-') || part.type === 'dynamic-tool') {
+                      // Extracted toolName from part.type (e.g. "tool-show_dataplate_guide" -> "show_dataplate_guide")
+                      const toolName =
+                        part.toolName ||
+                        part.toolInvocation?.toolName ||
+                        part.type?.replace('tool-', '');
+                      const toolInput =
+                        part.args ||
+                        part.input ||
+                        part.toolInvocation?.args ||
+                        part.toolInvocation?.input;
+
+                      if (toolName === 'show_dataplate_guide') {
+                        return (
+                          <div
+                            key={index}
+                            className="flex flex-col gap-4 mt-3 mb-2 bg-white/50 dark:bg-black/20 p-4 rounded-xl border border-[var(--color-brand-blue)]/20 shadow-sm"
+                          >
+                            <p className="font-semibold text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]">
+                              {isEs
+                                ? 'Información importante sobre la placa de datos'
+                                : 'Important information about the data plate'}
+                            </p>
+                            <div className="text-sm text-gray-700 dark:text-gray-300 space-y-3">
+                              <p>
+                                {isEs ? 'El ' : 'The '}
+                                <span className="font-bold" style={{ color: '#c59b27' }}>
+                                  {isEs ? 'número de parte' : 'part number'}
+                                </span>
+                                {isEs
+                                  ? ' de un producto ZIEHL-ABEGG es necesario para identificar el reemplazo correcto. Generalmente es un número de 6 dígitos que comienza con un 1 o un 2.'
+                                  : ' of a ZIEHL-ABEGG product is necessary to identify the correct replacement. It is generally a 6-digit number starting with a 1 or a 2.'}
+                              </p>
+                              <p>
+                                {isEs ? 'El ' : 'The '}
+                                <span className="font-bold" style={{ color: '#005b9f' }}>
+                                  {isEs ? 'modelo' : 'fan model'}
+                                </span>
+                                {isEs
+                                  ? ' del ventilador es necesario para confirmar que el número de pieza suministrado coincide con el diseño de la unidad solicitado.'
+                                  : ' is necessary to confirm that the supplied part number matches the requested unit design.'}
+                              </p>
+                            </div>
+                            <div className="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-white">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src="/images/dataplate-guide.jpg"
+                                alt="Guía de placa de datos ZIEHL-ABEGG"
+                                className="w-full h-auto object-contain"
+                              />
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (toolName === 'submit_quote_request') {
+                        return (
+                          <div key={index} className="flex flex-col gap-3 mt-3">
+                            <div className="flex items-center gap-2 text-[var(--color-brand-light)] font-semibold border-b border-gray-100 dark:border-gray-800 pb-2">
+                              <Loader2 className="animate-spin" size={16} />
+                              {isEs ? 'Procesando Cotización...' : 'Processing Quote...'}
+                            </div>
+                            <div className="text-sm font-medium text-gray-500">
+                              {isEs ? 'Datos enviados a ZIEHL-ABEGG:' : 'Data sent to ZIEHL-ABEGG:'}
+                            </div>
+                            <pre className="text-xs bg-gray-50 dark:bg-black/50 p-3 rounded-xl overflow-x-auto text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 shadow-inner">
+                              {JSON.stringify(toolInput, null, 2)}
+                            </pre>
+                          </div>
+                        );
+                      }
+
+                      // Debug fallback for unrecognized tools
+                      return (
+                        <div
+                          key={index}
+                          className="text-xs text-red-500 mt-2 p-2 border border-red-200 rounded"
+                        >
+                          <p>DEBUG Unrecognized Tool: {toolName}</p>
+                          <pre>{JSON.stringify(part, null, 2)}</pre>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })}
                 </div>
 
                 {m.role === 'user' && (

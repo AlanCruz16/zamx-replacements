@@ -67,11 +67,42 @@ export async function GET() {
   // 2. Procesar con Gemini sin mantener el socket IMAP abierto (evita Timeouts)
   const successfulUids: number[] = [];
 
+  // DEDUPLICACIÓN: Si hay múltiples correos no leídos para el mismo REQ (por ejemplo, hilos de correo),
+  // solo procesamos el más reciente (el de mayor UID) y marcamos el resto como leídos.
+  const uniqueMessagesMap = new Map<string, { uid: number; requestId: string; textBody: string }>();
+
   for (const msg of messagesToProcess) {
+    if (
+      !uniqueMessagesMap.has(msg.requestId) ||
+      uniqueMessagesMap.get(msg.requestId)!.uid < msg.uid
+    ) {
+      if (uniqueMessagesMap.has(msg.requestId)) {
+        // El anterior era un duplicado, lo marcamos como éxito para que sea leído
+        successfulUids.push(uniqueMessagesMap.get(msg.requestId)!.uid);
+      }
+      uniqueMessagesMap.set(msg.requestId, msg);
+    } else {
+      // Es un correo más viejo del mismo hilo, ignorarlo pero marcarlo como leído
+      successfulUids.push(msg.uid);
+    }
+  }
+
+  const uniqueMessagesToProcess = Array.from(uniqueMessagesMap.values());
+
+  for (const msg of uniqueMessagesToProcess) {
     console.log(`Procesando email recibido para ${msg.requestId}`);
     try {
       const quote = await convex.query(api.quotes.getByRequestId, { requestId: msg.requestId });
       if (quote) {
+        // Evitar procesar correos duplicados o hilos de correos de una cotización ya procesada
+        if (quote.status !== 'pending_review') {
+          console.log(
+            `La cotización ${msg.requestId} ya fue procesada anteriormente (status: ${quote.status}). Ignorando este correo para evitar duplicados.`
+          );
+          successfulUids.push(msg.uid);
+          continue;
+        }
+
         const interpretation = await parseEmployeeResponse(quote, msg.textBody);
         let finalClassification = interpretation.classification;
         if (interpretation.confidence < 0.7) {
@@ -92,13 +123,20 @@ export async function GET() {
 
         // Generar y enviar PDF si el empleado autorizó o modificó
         const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-        if (finalClassification === 'employee_approved' || finalClassification === 'employee_modified' || finalClassification === 'approved' || finalClassification === 'modified') {
+        if (
+          finalClassification === 'employee_approved' ||
+          finalClassification === 'employee_modified' ||
+          finalClassification === 'approved' ||
+          finalClassification === 'modified'
+        ) {
           await fetch(`${baseUrl}/api/send-client-quote`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ quoteId: msg.requestId }),
           }).catch((e) => console.error('Error trigger PDF:', e));
-        } else if (['oem_exclusive', 'obsolete', 'needs_info', 'rejected'].includes(finalClassification)) {
+        } else if (
+          ['oem_exclusive', 'obsolete', 'needs_info', 'rejected'].includes(finalClassification)
+        ) {
           // Enviar correo de rechazo si el empleado declinó la cotización
           await fetch(`${baseUrl}/api/send-rejection-email`, {
             method: 'POST',
@@ -106,7 +144,7 @@ export async function GET() {
             body: JSON.stringify({
               quoteId: msg.requestId,
               status: finalClassification,
-              explanation: interpretation.explanation
+              explanation: interpretation.explanation,
             }),
           }).catch((e) => console.error('Error trigger Rejection Email:', e));
         }
@@ -140,7 +178,7 @@ export async function GET() {
     } finally {
       try {
         await markClient.logout();
-      } catch (e) { }
+      } catch {}
     }
   }
 
