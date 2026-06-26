@@ -45,6 +45,8 @@ export const create = mutation({
       // Find matching pricing rule by prefix (e.g. MK, ZN, RH)
       let pricePerUnitUSD = 0;
 
+      let isUnknownPrefix = false;
+
       const rule = pricingRules.find(
         (r) => product.model.toUpperCase().startsWith(r.prefix.toUpperCase()) && r.isActive
       );
@@ -54,8 +56,9 @@ export const create = mutation({
         pricePerUnitUSD =
           Math.floor(Math.random() * (rule.maxPriceUSD - rule.minPriceUSD + 1)) + rule.minPriceUSD;
       } else {
-        // Fallback price if no rule matches
-        pricePerUnitUSD = 1000;
+        // Fallback price if no rule matches: 2500 to 3000 USD
+        pricePerUnitUSD = Math.floor(Math.random() * (3000 - 2500 + 1)) + 2500;
+        isUnknownPrefix = true;
       }
 
       subtotalUSD += pricePerUnitUSD * product.quantity;
@@ -67,6 +70,7 @@ export const create = mutation({
         deliveryLocation: product.deliveryLocation,
         pricePerUnitUSD,
         deliveryWeeks: currentDeliveryWeeks,
+        isUnknownPrefix,
       };
     });
 

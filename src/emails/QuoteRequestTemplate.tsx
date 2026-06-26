@@ -9,8 +9,8 @@ import {
   Text,
   Hr,
   Tailwind,
-} from "@react-email/components";
-import * as React from "react";
+} from '@react-email/components';
+import * as React from 'react';
 
 interface Product {
   partNumber: string;
@@ -19,6 +19,7 @@ interface Product {
   deliveryLocation: string;
   pricePerUnitUSD: number;
   deliveryWeeks: number;
+  isUnknownPrefix?: boolean;
 }
 
 interface QuoteRequestEmailProps {
@@ -31,8 +32,8 @@ interface QuoteRequestEmailProps {
 }
 
 export const QuoteRequestTemplate = ({
-  requestId = "REQ-123456",
-  userName = "Cliente Frecuente",
+  requestId = 'REQ-123456',
+  userName = 'Cliente Frecuente',
   products = [],
   subtotalUSD = 0,
   taxUSD = 0,
@@ -48,13 +49,12 @@ export const QuoteRequestTemplate = ({
             <Heading className="text-black text-[24px] font-normal text-center p-0 my-[30px] mx-0">
               <strong>ZIEHL-ABEGG</strong>
             </Heading>
+            <Text className="text-black text-[14px] leading-[24px]">Hola equipo de ventas,</Text>
             <Text className="text-black text-[14px] leading-[24px]">
-              Hola equipo de ventas,
+              El cliente <strong>{userName}</strong> ha generado una nueva solicitud de cotización a
+              través del portal de reemplazos.
             </Text>
-            <Text className="text-black text-[14px] leading-[24px]">
-              El cliente <strong>{userName}</strong> ha generado una nueva solicitud de cotización a través del portal de reemplazos.
-            </Text>
-            
+
             <Section className="bg-blue-50 p-4 rounded-md mb-4">
               <Text className="text-black text-[14px] leading-[24px] font-bold m-0">
                 ID de Solicitud: {requestId}
@@ -64,9 +64,9 @@ export const QuoteRequestTemplate = ({
             <Heading className="text-black text-[18px] font-normal mb-2">
               Productos Solicitados
             </Heading>
-            
+
             <Hr className="border border-solid border-gray-200 my-[10px] mx-0" />
-            
+
             {products.map((product, index) => (
               <Section key={index} className="mb-4">
                 <Text className="text-black text-[14px] leading-[20px] m-0">
@@ -82,8 +82,15 @@ export const QuoteRequestTemplate = ({
                   <strong>Lugar de Entrega:</strong> {product.deliveryLocation}
                 </Text>
                 <Text className="text-gray-600 text-[13px] leading-[20px] m-0 italic">
-                  * Precio sugerido: ${product.pricePerUnitUSD} USD | Entrega est.: {product.deliveryWeeks} semanas
+                  * Precio sugerido: ${product.pricePerUnitUSD} USD | Entrega est.:{' '}
+                  {product.deliveryWeeks} semanas
                 </Text>
+                {product.isUnknownPrefix && (
+                  <Text className="text-amber-600 text-[13px] leading-[20px] m-0 font-semibold mt-1">
+                    ⚠️ Atención: El número de parte / modelo no está en la lógica estándar de
+                    precios.
+                  </Text>
+                )}
                 <Hr className="border border-solid border-gray-100 my-[10px] mx-0" />
               </Section>
             ))}
@@ -101,7 +108,8 @@ export const QuoteRequestTemplate = ({
             </Section>
 
             <Text className="text-black text-[14px] leading-[24px] mt-6">
-              Por favor, revisa esta solicitud en el sistema para enviar la cotización formal al cliente.
+              Por favor, revisa esta solicitud en el sistema para enviar la cotización formal al
+              cliente.
             </Text>
           </Container>
         </Body>

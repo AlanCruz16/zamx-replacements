@@ -38,6 +38,7 @@ export default defineSchema({
         deliveryLocation: v.string(),
         pricePerUnitUSD: v.number(),
         deliveryWeeks: v.number(),
+        isUnknownPrefix: v.optional(v.boolean()),
       })
     ),
     subtotalUSD: v.number(),
