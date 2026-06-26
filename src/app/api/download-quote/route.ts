@@ -30,7 +30,7 @@ export async function GET(req: Request) {
     const validUntil = new Date(quote.expiresAt).toLocaleDateString('es-MX');
 
     const pdfProps = {
-      quoteId: quote.quoteNumber || quoteId,
+      quoteId: quote.requestId || quoteId,
       requestId: quote.requestId,
       date,
       validUntil,
@@ -51,12 +51,13 @@ export async function GET(req: Request) {
       subtotal: quote.subtotalUSD,
       iva: quote.taxUSD || 0,
       total: quote.totalUSD || 0,
-      employeeName: quote.confirmedByEmployee || 'Ventas ZAMX',
+      employeeName: 'Ventas ZAMX',
       employeeEmail: 'cotizaciones@ziehl-abegg.com.mx',
       baseUrl,
     };
 
     // 3. Renderizar el PDF a un Node Stream
+    // @ts-expect-error Incompatibilidad de tipos entre react-pdf y React 19
     const stream = await renderToStream(React.createElement(QuoteDocument, pdfProps));
 
     // 4. Devolver la respuesta con los headers correctos para un PDF

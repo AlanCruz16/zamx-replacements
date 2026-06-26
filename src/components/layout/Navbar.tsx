@@ -59,7 +59,7 @@ export default function Navbar() {
               />
             )}
             <div className="h-8 w-8 rounded-full shadow-sm overflow-hidden flex items-center justify-center bg-gray-100 dark:bg-gray-800">
-              <UserButton afterSignOutUrl="/" />
+              <UserButton />
             </div>
           </div>
         </div>

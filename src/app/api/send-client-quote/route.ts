@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     const validUntil = new Date(quote.expiresAt).toLocaleDateString('es-MX');
 
     const pdfProps = {
-      quoteId: quote.quoteNumber || quoteId,
+      quoteId: quote.requestId || quoteId,
       requestId: quote.requestId,
       date,
       validUntil,
@@ -55,14 +55,15 @@ export async function POST(req: Request) {
         deliveryWeeks: p.deliveryWeeks || 8,
       })),
       subtotal: quote.subtotalUSD,
-      iva: quote.taxUSD || quote.ivaAmount || 0, // depende de cómo lo nombramos en schema
-      total: quote.totalUSD || quote.totalAmountUSD || 0,
-      employeeName: quote.confirmedByEmployee || 'Ventas ZAMX',
+      iva: quote.taxUSD || 0,
+      total: quote.totalUSD || 0,
+      employeeName: 'Ventas ZAMX',
       employeeEmail: 'cotizaciones@ziehl-abegg.com.mx',
       baseUrl,
     };
 
     // 3. Renderizar el PDF a Buffer
+    // @ts-expect-error Incompatibilidad de tipos entre react-pdf y React 19
     const pdfBuffer = await renderToBuffer(React.createElement(QuoteDocument, pdfProps));
 
     // 4. Renderizar el HTML del Email

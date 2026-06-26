@@ -20,16 +20,16 @@ export async function GET(req: Request) {
     const lock = await client.getMailboxLock('INBOX');
     const messages = client.fetch('1:*', { envelope: true, flags: true });
     const allEmails = [];
-    
+
     for await (const message of messages) {
       allEmails.push({
         uid: message.uid,
-        subject: message.envelope.subject,
-        from: message.envelope.from,
-        flags: Array.from(message.flags)
+        subject: message.envelope?.subject,
+        from: message.envelope?.from,
+        flags: message.flags ? Array.from(message.flags) : [],
       });
     }
-    
+
     lock.release();
     return NextResponse.json({ success: true, count: allEmails.length, emails: allEmails });
   } catch (err) {

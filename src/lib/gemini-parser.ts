@@ -2,6 +2,7 @@ import { generateObject } from 'ai';
 import { google } from '@ai-sdk/google';
 import { z } from 'zod';
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function parseEmployeeResponse(quote: any, employeeText: string) {
   const systemPrompt = `
 Eres un sistema de ZIEHL-ABEGG México. Analiza la respuesta del empleado a una solicitud de cotización de reemplazo.
@@ -26,17 +27,27 @@ Si la intención no es clara, la "confidence" debe ser menor a 0.7.
   const { object: interpretation } = await generateObject({
     model: google('gemini-3.1-flash-lite'),
     system: systemPrompt,
-    prompt: "Analiza la respuesta del empleado y extrae los datos.",
+    prompt: 'Analiza la respuesta del empleado y extrae los datos.',
     schema: z.object({
       classification: z.enum(['approved', 'modified', 'oem_exclusive', 'obsolete', 'needs_info']),
       confidence: z.number().describe('Nivel de confianza del 0 al 1 de la interpretación.'),
-      explanation: z.string().describe('Resumen breve de la decisión del empleado en lenguaje interno.'),
-      newPricesUSD: z.array(z.object({
-        partNumber: z.string(),
-        price: z.number()
-      })).optional().describe('Lista de nuevos precios si el empleado los modificó.'),
-      newDeliveryWeeks: z.number().optional().describe('Nuevo tiempo de entrega en semanas si el empleado lo modificó.')
-    })
+      explanation: z
+        .string()
+        .describe('Resumen breve de la decisión del empleado en lenguaje interno.'),
+      newPricesUSD: z
+        .array(
+          z.object({
+            partNumber: z.string(),
+            price: z.number(),
+          })
+        )
+        .optional()
+        .describe('Lista de nuevos precios si el empleado los modificó.'),
+      newDeliveryWeeks: z
+        .number()
+        .optional()
+        .describe('Nuevo tiempo de entrega en semanas si el empleado lo modificó.'),
+    }),
   });
 
   return interpretation;

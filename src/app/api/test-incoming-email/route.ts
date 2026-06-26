@@ -10,23 +10,30 @@ export async function POST(req: Request) {
     const { requestId, employeeText } = await req.json();
 
     if (!requestId || !employeeText) {
-      return NextResponse.json({ success: false, error: "Falta requestId o employeeText" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Falta requestId o employeeText' },
+        { status: 400 }
+      );
     }
 
     // 1. Get original quote context
     const quote = await convex.query(api.quotes.getByRequestId, { requestId });
     if (!quote) {
-      return NextResponse.json({ success: false, error: "Cotización no encontrada" }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: 'Cotización no encontrada' },
+        { status: 404 }
+      );
     }
 
     // 2. Ask Gemini to interpret
     const interpretation = await parseEmployeeResponse(quote, employeeText);
 
-    console.log("Gemini Interpretation:", interpretation);
+    console.log('Gemini Interpretation:', interpretation);
 
     // 4. If confidence is too low, we mark it as pending_review instead of failing
     let finalClassification = interpretation.classification;
     if (interpretation.confidence < 0.7) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       finalClassification = 'pending_review' as any;
     }
 
@@ -41,7 +48,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, interpretation, result });
   } catch (error) {
-    console.error("Error processing email simulation:", error);
+    console.error('Error processing email simulation:', error);
     return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
   }
 }
@@ -53,7 +60,10 @@ export async function GET(req: Request) {
     const employeeText = searchParams.get('employeeText');
 
     if (!requestId || !employeeText) {
-      return NextResponse.json({ success: false, error: "Usa query params: ?requestId=REQ-XXX&employeeText=mensaje" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: 'Usa query params: ?requestId=REQ-XXX&employeeText=mensaje' },
+        { status: 400 }
+      );
     }
 
     // Fake a Request object to reuse POST logic
@@ -67,4 +77,3 @@ export async function GET(req: Request) {
     return NextResponse.json({ success: false, error: String(error) }, { status: 500 });
   }
 }
-

@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     const emailHtml = await render(
       React.createElement(RejectedQuoteEmail, {
         fullName: user.fullName,
-        quoteId: quote.quoteNumber || quoteId,
+        quoteId: quote.requestId || quoteId,
         status: status,
         explanation: explanation || quote.employeeExplanation,
         baseUrl,
@@ -44,7 +44,7 @@ export async function POST(req: Request) {
     const { data: resendData, error } = await resend.emails.send({
       from: 'ZAMX Cotizaciones <cotizaciones@za.idcn.com.mx>', // Cambiar en prod a @ziehl-abegg.com.mx
       to: [user.email], // Se envía al correo registrado por el cliente
-      subject: `Actualización sobre su solicitud ZAMX-Q-${quote.quoteNumber || quoteId}`,
+      subject: `Actualización sobre su solicitud ZAMX-Q-${quote.requestId || quoteId}`,
       html: emailHtml,
     });
 
