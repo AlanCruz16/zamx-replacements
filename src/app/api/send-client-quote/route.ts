@@ -5,7 +5,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../convex/_generated/api';
 import { QuoteDocument } from '@/components/pdf/QuoteDocument';
 import { ClientQuoteEmail } from '@/emails/ClientQuoteEmail';
-import { render } from '@react-email/components';
+import { render } from 'react-email';
 import React from 'react';
 
 const resend = new Resend(process.env.RESEND_API_KEY);

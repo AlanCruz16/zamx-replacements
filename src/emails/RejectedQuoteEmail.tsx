@@ -11,7 +11,7 @@ import {
   Tailwind,
   Hr,
   Link,
-} from '@react-email/components';
+} from 'react-email';
 
 interface RejectedQuoteEmailProps {
   fullName: string;
