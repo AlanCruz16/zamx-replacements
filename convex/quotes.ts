@@ -39,6 +39,11 @@ export const create = mutation({
       currentDeliveryWeeks = currentSeason.deliveryWeeks;
     }
 
+    // Sort rules by prefix length descending so more specific prefixes match first
+    const sortedRules = [...pricingRules].sort(
+      (a, b) => b.prefix.trim().length - a.prefix.trim().length
+    );
+
     // 3. Process each product to calculate price and delivery
     let subtotalUSD = 0;
     const processedProducts = args.products.map((product) => {
@@ -47,8 +52,9 @@ export const create = mutation({
 
       let isUnknownPrefix = false;
 
-      const rule = pricingRules.find(
-        (r) => product.model.toUpperCase().startsWith(r.prefix.toUpperCase()) && r.isActive
+      const rule = sortedRules.find(
+        (r) =>
+          product.model.trim().toUpperCase().startsWith(r.prefix.trim().toUpperCase()) && r.isActive
       );
 
       if (rule) {
