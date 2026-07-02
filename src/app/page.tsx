@@ -271,16 +271,10 @@ export default function Dashboard() {
                       if (toolName === 'submit_quote_request') {
                         return (
                           <div key={index} className="flex flex-col gap-3 mt-3">
-                            <div className="flex items-center gap-2 text-[var(--color-brand-light)] font-semibold border-b border-gray-100 dark:border-gray-800 pb-2">
+                            <div className="flex items-center gap-2 text-[var(--color-brand-light)] font-semibold pb-2">
                               <Loader2 className="animate-spin" size={16} />
                               {isEs ? 'Procesando Cotización...' : 'Processing Quote...'}
                             </div>
-                            <div className="text-sm font-medium text-gray-500">
-                              {isEs ? 'Datos enviados a ZIEHL-ABEGG:' : 'Data sent to ZIEHL-ABEGG:'}
-                            </div>
-                            <pre className="text-xs bg-gray-50 dark:bg-black/50 p-3 rounded-xl overflow-x-auto text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-800 shadow-inner">
-                              {JSON.stringify(toolInput, null, 2)}
-                            </pre>
                           </div>
                         );
                       }
@@ -362,7 +356,7 @@ export default function Dashboard() {
             </div>
           </form>
           <p className="text-center text-xs text-gray-400 mt-4 font-medium tracking-wide">
-            ZAMX Replacements MVP v0.1 • Gemini 2.5 Flash
+            &copy; 2026 ZAMX Replacements. Todos los derechos reservados.
           </p>
         </div>
       </div>

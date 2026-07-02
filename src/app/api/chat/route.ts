@@ -91,7 +91,7 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
             try {
               await resend.emails.send({
                 from: 'ZAMX Soporte <soporte@za.idcn.com.mx>',
-                to: ['alancengineer@outlook.com'], // Enviar al correo del administrador
+                to: [process.env.ADMIN_EMAIL as string], // Enviar al correo del administrador configurado en entorno
                 replyTo: process.env.IMAP_USER as string,
                 subject: `Nueva solicitud de cotización: [${result.requestId}]`,
                 react: QuoteRequestTemplate({
