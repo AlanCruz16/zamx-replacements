@@ -3,7 +3,7 @@ import { Resend } from 'resend';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../convex/_generated/api';
 import { RejectedQuoteEmail } from '@/emails/RejectedQuoteEmail';
-import { render } from '@react-email/components';
+import { render } from 'react-email';
 import React from 'react';
 
 const resend = new Resend(process.env.RESEND_API_KEY);

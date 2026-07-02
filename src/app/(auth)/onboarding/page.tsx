@@ -18,7 +18,7 @@ export default function OnboardingPage() {
 
   // Pre-fill full name if available
   useEffect(() => {
-    if (user && user.fullName) {
+    if (user && user.fullName && user.fullName !== 'Sin nombre') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFullName(user.fullName);
     }

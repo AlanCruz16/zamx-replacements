@@ -1,4 +1,4 @@
-import { Body, Container, Head, Heading, Html, Preview, Text } from '@react-email/components';
+import { Body, Container, Head, Heading, Html, Preview, Text } from 'react-email';
 import * as React from 'react';
 
 interface ClientQuoteEmailProps {
@@ -27,8 +27,8 @@ export const ClientQuoteEmail = ({ fullName, quoteId }: ClientQuoteEmailProps) =
         </Text>
 
         <Text style={text}>
-          Si tiene alguna duda o desea proceder con la orden de compra, por favor responda a este
-          correo haciendo referencia al número de cotización.
+          Si tiene alguna duda o desea proceder con la orden de compra, use el correo proporcionado
+          al final del documento PDF haciendo referencia al número de cotización.
         </Text>
 
         <Text style={text}>

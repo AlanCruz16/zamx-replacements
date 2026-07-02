@@ -34,7 +34,7 @@ http.route({
 
         await ctx.runMutation(internal.users.upsertFromClerk, {
           clerkId: id,
-          fullName: fullName || 'Sin nombre',
+          fullName: fullName || '',
           email: email,
         });
       }
