@@ -11,6 +11,10 @@ const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 export async function POST(req: Request) {
   try {
+    if (req.headers.get('x-internal-secret') !== process.env.INTERNAL_API_SECRET) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { quoteId, status, explanation } = await req.json();
 
     if (!quoteId || !status) {

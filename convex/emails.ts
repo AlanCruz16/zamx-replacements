@@ -129,7 +129,10 @@ export const checkInbox = internalAction({
               ) {
                 await fetch(`${baseUrl}/api/send-client-quote`, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-internal-secret': process.env.INTERNAL_API_SECRET!,
+                  },
                   body: JSON.stringify({ quoteId: msg.requestId }),
                 }).catch((e) => console.error('Error trigger PDF:', e));
               } else if (
@@ -139,7 +142,10 @@ export const checkInbox = internalAction({
               ) {
                 await fetch(`${baseUrl}/api/send-rejection-email`, {
                   method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-internal-secret': process.env.INTERNAL_API_SECRET!,
+                  },
                   body: JSON.stringify({
                     quoteId: msg.requestId,
                     status: finalClassification,

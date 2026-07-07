@@ -1,6 +1,6 @@
-import { mutation } from './_generated/server';
+import { internalMutation } from './_generated/server';
 
-export const seedData = mutation({
+export const seedData = internalMutation({
   args: {},
   handler: async (ctx) => {
     // Clear existing pricing rules to allow reseeding with new precise prefixes
