@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# agent tickets, specs and wayfinder maps (see docs/agents/issue-tracker.md)
+/.scratch
