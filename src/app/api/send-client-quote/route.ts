@@ -24,7 +24,10 @@ export async function POST(req: Request) {
     }
 
     // 1. Obtener la cotización y el usuario de Convex
-    const data = await convex.query(api.quotes.getFullQuoteDetails, { requestId: quoteId });
+    const data = await convex.query(api.quotes.getFullQuoteDetails, {
+      requestId: quoteId,
+      secret: process.env.INTERNAL_API_SECRET!,
+    });
     if (!data) {
       return NextResponse.json(
         { success: false, error: 'Cotización o usuario no encontrados' },

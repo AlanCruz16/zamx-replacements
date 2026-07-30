@@ -1,9 +1,10 @@
-import { mutation, query } from './_generated/server';
+import { mutation, query, internalMutation } from './_generated/server';
 import { v } from 'convex/values';
 
 export const create = mutation({
   args: {
     clerkId: v.string(),
+    secret: v.string(),
     products: v.array(
       v.object({
         partNumber: v.string(),
@@ -14,6 +15,10 @@ export const create = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    if (args.secret !== process.env.INTERNAL_API_SECRET) {
+      throw new Error('No autorizado');
+    }
+
     // 1. Get the user from clerkId
     const user = await ctx.db
       .query('users')
@@ -110,7 +115,7 @@ export const create = mutation({
   },
 });
 
-export const processEmployeeResponse = mutation({
+export const processEmployeeResponse = internalMutation({
   args: {
     requestId: v.string(),
     classification: v.string(),
@@ -126,10 +131,10 @@ export const processEmployeeResponse = mutation({
     newDeliveryWeeks: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    // 1. Find the quote by requestId
+    // 1. Find the quote by requestId using index
     const quote = await ctx.db
       .query('quotes')
-      .filter((q) => q.eq(q.field('requestId'), args.requestId))
+      .withIndex('by_request_id', (q) => q.eq('requestId', args.requestId))
       .first();
 
     if (!quote) {
@@ -214,12 +219,32 @@ export const processEmployeeResponse = mutation({
 });
 
 export const getByRequestId = query({
-  args: { requestId: v.string() },
+  args: { requestId: v.string(), secret: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const quote = await ctx.db
       .query('quotes')
       .withIndex('by_request_id', (q) => q.eq('requestId', args.requestId))
       .first();
+
+    if (!quote) return null;
+
+    if (args.secret === process.env.INTERNAL_API_SECRET) {
+      return quote;
+    }
+
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error('No autenticado');
+
+    const user = await ctx.db
+      .query('users')
+      .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
+      .unique();
+
+    if (!user || user._id !== quote.userId) {
+      throw new Error('No autorizado');
+    }
+
+    return quote;
   },
 });
 
@@ -235,7 +260,7 @@ export const markAsSentToClient = mutation({
   },
 });
 export const getFullQuoteDetails = query({
-  args: { requestId: v.string() },
+  args: { requestId: v.string(), secret: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const quote = await ctx.db
       .query('quotes')
@@ -246,6 +271,13 @@ export const getFullQuoteDetails = query({
 
     const user = await ctx.db.get(quote.userId);
     if (!user) return null;
+
+    if (args.secret !== process.env.INTERNAL_API_SECRET) {
+      const identity = await ctx.auth.getUserIdentity();
+      if (!identity || identity.subject !== user.clerkId) {
+        throw new Error('No autorizado');
+      }
+    }
 
     // ... previous content ...
     return { quote, user };

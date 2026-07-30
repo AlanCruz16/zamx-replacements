@@ -1,7 +1,7 @@
 'use node';
 
 import { internalAction } from './_generated/server';
-import { api } from './_generated/api';
+import { api, internal } from './_generated/api';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { parseEmployeeResponse } from '../src/lib/gemini-parser';
@@ -102,7 +102,7 @@ export const checkInbox = internalAction({
             finalClassification = 'pending_review';
           }
 
-          await ctx.runMutation(api.quotes.processEmployeeResponse, {
+          await ctx.runMutation(internal.quotes.processEmployeeResponse, {
             requestId: msg.requestId,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             classification: finalClassification as any,

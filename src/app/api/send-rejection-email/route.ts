@@ -21,8 +21,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Faltan datos' }, { status: 400 });
     }
 
-    // 1. Obtener la cotización y el usuario de Convex
-    const data = await convex.query(api.quotes.getFullQuoteDetails, { requestId: quoteId });
+    // 1. Obtener usuario asociado a la cotización
+    const data = await convex.query(api.quotes.getFullQuoteDetails, {
+      requestId: quoteId,
+      secret: process.env.INTERNAL_API_SECRET!,
+    });
     if (!data) {
       return NextResponse.json(
         { success: false, error: 'Cotización o usuario no encontrados' },

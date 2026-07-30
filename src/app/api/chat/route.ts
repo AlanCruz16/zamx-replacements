@@ -90,6 +90,7 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
             // 1. Guardar la cotización en Convex
             const result = await convex.mutation(api.quotes.create, {
               clerkId,
+              secret: process.env.INTERNAL_API_SECRET!,
               products,
             });
 
