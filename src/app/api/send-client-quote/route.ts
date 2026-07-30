@@ -13,6 +13,10 @@ const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 export async function POST(req: Request) {
   try {
+    if (req.headers.get('x-internal-secret') !== process.env.INTERNAL_API_SECRET) {
+      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { quoteId } = await req.json();
 
     if (!quoteId) {
@@ -20,7 +24,10 @@ export async function POST(req: Request) {
     }
 
     // 1. Obtener la cotización y el usuario de Convex
-    const data = await convex.query(api.quotes.getFullQuoteDetails, { requestId: quoteId });
+    const data = await convex.query(api.quotes.getFullQuoteDetails, {
+      requestId: quoteId,
+      secret: process.env.INTERNAL_API_SECRET!,
+    });
     if (!data) {
       return NextResponse.json(
         { success: false, error: 'Cotización o usuario no encontrados' },

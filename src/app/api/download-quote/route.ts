@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { auth } from '@clerk/nextjs/server';
 import { renderToStream } from '@react-pdf/renderer';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../convex/_generated/api';
@@ -16,13 +17,27 @@ export async function GET(req: Request) {
       return new NextResponse('Falta quoteId', { status: 400 });
     }
 
+    const { userId } = await auth();
+    if (!userId) {
+      return new NextResponse('Unauthorized', { status: 401 });
+    }
+
     // 1. Obtener la cotización y el usuario de Convex
-    const data = await convex.query(api.quotes.getFullQuoteDetails, { requestId: quoteId });
+    const data = await convex.query(api.quotes.getFullQuoteDetails, {
+      requestId: quoteId,
+      secret: process.env.INTERNAL_API_SECRET!,
+    });
+
     if (!data) {
       return new NextResponse('Cotización o usuario no encontrados', { status: 404 });
     }
 
     const { quote, user } = data;
+
+    // Verificar IDOR
+    if (user.clerkId !== userId) {
+      return new NextResponse('Unauthorized', { status: 401 });
+    }
 
     // 2. Preparar los datos para el PDF
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';

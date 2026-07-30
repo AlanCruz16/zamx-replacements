@@ -1,5 +1,6 @@
 import { streamText, tool, convertToModelMessages, type UIMessage, stepCountIs } from 'ai';
 import { google } from '@ai-sdk/google';
+import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
 import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../convex/_generated/api';
@@ -16,7 +17,12 @@ export async function POST(req: Request) {
   const { messages, data } = await req.json();
   const userName = data?.userName || 'Cliente';
   const language = data?.language || 'es';
-  const clerkId = data?.clerkId;
+  const { userId } = await auth();
+
+  if (!userId) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  const clerkId = userId;
 
   const systemPrompt = `
 Eres un asistente experto en ventas y cotizaciones de ZIEHL-ABEGG México.
@@ -84,6 +90,7 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
             // 1. Guardar la cotización en Convex
             const result = await convex.mutation(api.quotes.create, {
               clerkId,
+              secret: process.env.INTERNAL_API_SECRET!,
               products,
             });
 

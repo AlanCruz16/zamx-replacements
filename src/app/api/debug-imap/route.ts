@@ -4,6 +4,10 @@ import { ImapFlow } from 'imapflow';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
+  if (process.env.NODE_ENV === 'production') {
+    return new Response('Not Found', { status: 404 });
+  }
+
   const client = new ImapFlow({
     host: process.env.IMAP_HOST!,
     port: parseInt(process.env.IMAP_PORT || '993', 10),
