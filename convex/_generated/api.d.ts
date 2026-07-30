@@ -9,9 +9,6 @@
  */
 
 import type * as crons from '../crons.js';
-import type * as debugProd from '../debugProd.js';
-import type * as debugProdEmails from '../debugProdEmails.js';
-import type * as debugProdQuotes from '../debugProdQuotes.js';
 import type * as emails from '../emails.js';
 import type * as http from '../http.js';
 import type * as init from '../init.js';
@@ -22,9 +19,6 @@ import type { ApiFromModules, FilterApi, FunctionReference } from 'convex/server
 
 declare const fullApi: ApiFromModules<{
   crons: typeof crons;
-  debugProd: typeof debugProd;
-  debugProdEmails: typeof debugProdEmails;
-  debugProdQuotes: typeof debugProdQuotes;
   emails: typeof emails;
   http: typeof http;
   init: typeof init;

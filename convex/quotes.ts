@@ -1,6 +1,18 @@
 import { mutation, query, internalMutation } from './_generated/server';
 import { v } from 'convex/values';
 
+/**
+ * Devuelve el secreto interno configurado. Lanza si no está configurado, para que
+ * una variable ausente nunca deje pasar a un llamador (undefined === undefined).
+ */
+function requireInternalSecret(): string {
+  const secret = process.env.INTERNAL_API_SECRET;
+  if (!secret) {
+    throw new Error('INTERNAL_API_SECRET no está configurado');
+  }
+  return secret;
+}
+
 export const create = mutation({
   args: {
     clerkId: v.string(),
@@ -228,7 +240,8 @@ export const getByRequestId = query({
 
     if (!quote) return null;
 
-    if (args.secret === process.env.INTERNAL_API_SECRET) {
+    const internalSecret = requireInternalSecret();
+    if (args.secret === internalSecret) {
       return quote;
     }
 
@@ -272,7 +285,8 @@ export const getFullQuoteDetails = query({
     const user = await ctx.db.get(quote.userId);
     if (!user) return null;
 
-    if (args.secret !== process.env.INTERNAL_API_SECRET) {
+    const internalSecret = requireInternalSecret();
+    if (args.secret !== internalSecret) {
       const identity = await ctx.auth.getUserIdentity();
       if (!identity || identity.subject !== user.clerkId) {
         throw new Error('No autorizado');
