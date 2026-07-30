@@ -14,6 +14,12 @@ export const checkInbox = internalAction({
       return;
     }
 
+    const internalSecret = process.env.INTERNAL_API_SECRET;
+    if (!internalSecret) {
+      console.error('INTERNAL_API_SECRET no configurado, no se pueden procesar respuestas');
+      return;
+    }
+
     const client = new ImapFlow({
       host: process.env.IMAP_HOST,
       port: parseInt(process.env.IMAP_PORT || '993', 10),
@@ -86,7 +92,10 @@ export const checkInbox = internalAction({
     for (const msg of uniqueMessagesToProcess) {
       console.log(`Procesando email recibido para ${msg.requestId}`);
       try {
-        const quote = await ctx.runQuery(api.quotes.getByRequestId, { requestId: msg.requestId });
+        const quote = await ctx.runQuery(api.quotes.getByRequestId, {
+          requestId: msg.requestId,
+          secret: internalSecret,
+        });
         if (quote) {
           if (quote.status !== 'pending_review') {
             console.log(
@@ -131,7 +140,7 @@ export const checkInbox = internalAction({
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
-                    'x-internal-secret': process.env.INTERNAL_API_SECRET!,
+                    'x-internal-secret': internalSecret,
                   },
                   body: JSON.stringify({ quoteId: msg.requestId }),
                 }).catch((e) => console.error('Error trigger PDF:', e));
@@ -144,7 +153,7 @@ export const checkInbox = internalAction({
                   method: 'POST',
                   headers: {
                     'Content-Type': 'application/json',
-                    'x-internal-secret': process.env.INTERNAL_API_SECRET!,
+                    'x-internal-secret': internalSecret,
                   },
                   body: JSON.stringify({
                     quoteId: msg.requestId,
