@@ -2,6 +2,7 @@
 import { convexTest } from 'convex-test';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { api, internal } from './_generated/api';
+import { SUGGESTED_DELIVERY_WEEKS } from './lib/delivery';
 import schema from './schema';
 
 /**
@@ -255,6 +256,89 @@ describe('quotes.create', () => {
 
     const quotes = await t.run(async (ctx) => ctx.db.query('quotes').collect());
     expect(quotes).toEqual([]);
+  });
+});
+
+/** Afirma que un producto lleva la Delivery Estimate sugerida configurada. */
+function expectConfiguredDeliveryRange(product: {
+  suggestedDeliveryWeeksMin: number;
+  suggestedDeliveryWeeksMax: number;
+}) {
+  expect(product.suggestedDeliveryWeeksMin).toBe(SUGGESTED_DELIVERY_WEEKS.min);
+  expect(product.suggestedDeliveryWeeksMax).toBe(SUGGESTED_DELIVERY_WEEKS.max);
+}
+
+describe('la Delivery Estimate sugerida', () => {
+  test('la capacidad configurada es de 25 a 30 semanas enteras', () => {
+    // Éste es el único sitio que nombra las cifras, a propósito. El resto de los
+    // tests las toman de la configuración para que un cambio de capacidad sea
+    // una edición de `lib/delivery.ts`; sin esta afirmación, sin embargo, volver
+    // a poner las 4–8 semanas de temporada pasaría la suite entera sin ruido, y
+    // subestimar la realidad en veinte semanas es justamente el defecto que este
+    // trabajo existe para cerrar. Cambiar la capacidad son dos ediciones, y las
+    // dos deliberadas.
+    expect(SUGGESTED_DELIVERY_WEEKS).toEqual({ min: 25, max: 30 });
+
+    // Semanas enteras y un mínimo que no supera al máximo, según el glosario. Un
+    // rango con los dos extremos iguales es válido: es una cifra ya acordada.
+    expect(Number.isInteger(SUGGESTED_DELIVERY_WEEKS.min)).toBe(true);
+    expect(Number.isInteger(SUGGESTED_DELIVERY_WEEKS.max)).toBe(true);
+    expect(SUGGESTED_DELIVERY_WEEKS.min).toBeLessThanOrEqual(SUGGESTED_DELIVERY_WEEKS.max);
+  });
+
+  test('cada producto de la Replacement Request lleva el rango configurado', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    const products = Array.from({ length: 3 }, (_, i) => ({ ...PRODUCT, partNumber: `P-${i}` }));
+    const result = await createQuote(t, clerkId, INTERNAL_SECRET, products);
+    const stored = await t.run(async (ctx) => ctx.db.get(result.quoteId));
+
+    // También sobre el registro escrito: el rango que ve el Approver en la
+    // respuesta y el que acaba en el Quote Document son el mismo hecho.
+    expect(result.products).toHaveLength(products.length);
+    expect(stored!.products).toHaveLength(products.length);
+    for (const product of [...result.products, ...stored!.products]) {
+      expectConfiguredDeliveryRange(product);
+    }
+  });
+
+  test('un producto sin Suggested Price lleva igualmente el rango configurado', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    // No cotizable no es lo mismo que sin Delivery Estimate: el Approver necesita
+    // el rango de fábrica para poder poner un precio a mano sobre él.
+    const result = await createQuote(t, clerkId, INTERNAL_SECRET, [
+      { ...PRODUCT, model: 'XX999-SIN-REGLA' },
+    ]);
+
+    expect(result.products[0].suggestedPriceUSD).toBeUndefined();
+    expectConfiguredDeliveryRange(result.products[0]);
+  });
+
+  test('el rango no depende del mes en curso', async () => {
+    // La capacidad de fábrica gobierna la entrega, no el calendario. Hoy nada en
+    // la ruta mira el reloj, así que esto no describe una rama viva: es una
+    // guardia contra reintroducir una búsqueda por mes como la tabla de
+    // temporadas que reemplaza, que daba 4, 5 u 8 semanas según la fecha — y ni
+    // siquiera eso, porque su rango octubre–marzo no podía emparejar al cruzar
+    // el fin de año. Por eso se recorren los doce meses y no dos.
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      for (let month = 0; month < 12; month++) {
+        vi.setSystemTime(new Date(Date.UTC(2026, month, 15)));
+
+        const result = await createQuote(t, clerkId);
+
+        expectConfiguredDeliveryRange(result.products[0]);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
