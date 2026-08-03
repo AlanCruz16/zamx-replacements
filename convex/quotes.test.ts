@@ -51,15 +51,26 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 type TestConvex = ReturnType<typeof convexTest>;
 
-/** Siembra la regla de precios que ambos Customers comparten. */
-async function seedPricingRule(t: TestConvex) {
+/** Siembra una regla de precios, partiendo de `PRICING_RULE`. */
+async function seedRule(t: TestConvex, rule: Partial<typeof PRICING_RULE> = {}) {
   await t.run(async (ctx) => {
-    await ctx.db.insert('pricing_rules', PRICING_RULE);
+    await ctx.db.insert('pricing_rules', { ...PRICING_RULE, ...rule });
   });
+}
+
+/**
+ * Deja el sorteo en un valor fijo, de modo que el generador de códigos sólo
+ * pueda producir uno. Una colisión real ocurre una vez cada 36^6 y no sería
+ * observable de otra forma; fijar el valor no depende de cuántos sorteos
+ * consuma la mutación ni en qué orden.
+ */
+function freezeRandom(value: number) {
+  vi.spyOn(Math, 'random').mockReturnValue(value);
 }
 
 /** Siembra un Customer y devuelve su clerkId. */
@@ -78,7 +89,7 @@ async function seedCustomer(t: TestConvex, clerkId: string, fullName: string) {
 
 /** Siembra la regla de precios y un Customer, el arreglo por defecto. */
 async function seed(t: TestConvex) {
-  await seedPricingRule(t);
+  await seedRule(t);
   return seedCustomer(t, 'user_ana', 'Ana');
 }
 
@@ -143,6 +154,97 @@ describe('quotes.create', () => {
     expect(stored).not.toBeNull();
     expect(stored!.requestId).toMatch(/^REQ-[A-Z0-9]+$/);
     expectWithinSeededRange(stored!.products[0].suggestedPriceUSD!);
+  });
+
+  test('gana el Model Prefix más largo, no el primero que coincide', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    // `MK` ya está sembrada y también coincide: si ganara la más corta, el precio
+    // caería en 4000–4200 y la aserción de rango fallaría.
+    await seedRule(t, { prefix: 'MK137', minPriceUSD: 9000, maxPriceUSD: 9100 });
+
+    const result = await createQuote(t, clerkId);
+
+    expect(result.products[0].suggestedPriceUSD).toBeGreaterThanOrEqual(9000);
+    expect(result.products[0].suggestedPriceUSD).toBeLessThanOrEqual(9100);
+  });
+
+  test('el emparejamiento tolera mayúsculas y espacios almacenados', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seedCustomer(t, 'user_ana', 'Ana');
+    await seedRule(t, { prefix: '  ck  ', minPriceUSD: 7000, maxPriceUSD: 7100 });
+
+    const result = await createQuote(t, clerkId, INTERNAL_SECRET, [
+      { ...PRODUCT, model: ' ck900-2ez.10.c ' },
+    ]);
+
+    expect(result.products[0].suggestedPriceUSD).toBeGreaterThanOrEqual(7000);
+    expect(result.products[0].suggestedPriceUSD).toBeLessThanOrEqual(7100);
+  });
+
+  test('una regla desactivada no cotiza aunque su prefijo coincida', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seedCustomer(t, 'user_ana', 'Ana');
+    await seedRule(t, { prefix: 'MK', isActive: false });
+
+    const result = await createQuote(t, clerkId);
+
+    expect(result.products[0].suggestedPriceUSD).toBeUndefined();
+  });
+
+  test('el Suggested Price se cotiza al centavo y nunca se sale del rango', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seedCustomer(t, 'user_ana', 'Ana');
+    // Un rango de menos de un dólar de ancho, con un máximo en fracciones de
+    // centavo: cotizar en dólares enteros, o redondear sólo el resultado del
+    // sorteo, se sale de él por arriba.
+    await seedRule(t, { prefix: 'MK', minPriceUSD: 1234.1, maxPriceUSD: 1234.905 });
+
+    // Veinte piezas ejercen el sorteo veinte veces sin tocar `Math.random`: lo
+    // que se afirma vale para cualquier valor que salga, no para uno guionado.
+    const products = Array.from({ length: 20 }, (_, i) => ({ ...PRODUCT, partNumber: `P-${i}` }));
+    const result = await createQuote(t, clerkId, INTERNAL_SECRET, products);
+
+    for (const { suggestedPriceUSD: price } of result.products) {
+      expect(price).toBeGreaterThanOrEqual(1234.1);
+      expect(price).toBeLessThanOrEqual(1234.905);
+      // Centavos, no milésimas: la aritmética del Quote Document tiene que
+      // cuadrar contra una orden de compra.
+      expect(price).toBe(Math.round(price! * 100) / 100);
+    }
+  });
+
+  test('los totales sugeridos cuadran al centavo contra los precios unitarios', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seedCustomer(t, 'user_ana', 'Ana');
+    await seedRule(t, { prefix: 'MK', minPriceUSD: 1234.56, maxPriceUSD: 1234.56 });
+
+    // 1234.56 × 2 = 2469.12; IVA 16% = 395.0592, que al centavo son 395.06.
+    const result = await createQuote(t, clerkId);
+
+    expect(result.subtotalUSD).toBe(2469.12);
+    expect(result.taxUSD).toBe(395.06);
+    expect(result.totalUSD).toBe(2864.18);
+  });
+
+  test('dos Replacement Requests nunca comparten código', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    // Con el sorteo congelado el generador sólo produce un código, así que la
+    // segunda Replacement Request no tiene ninguno libre. Falla en voz alta en
+    // vez de repetirlo: `by_request_id` resuelve con `.first()`, y un código
+    // repetido encaminaría la respuesta de un Approver a la request equivocada.
+    freezeRandom(0.1);
+
+    const primera = await createQuote(t, clerkId);
+    await expect(createQuote(t, clerkId)).rejects.toThrow(
+      'No se pudo generar un identificador de Replacement Request libre'
+    );
+
+    const stored = await t.run(async (ctx) => ctx.db.query('quotes').collect());
+    expect(stored.map((q) => q.requestId)).toEqual([primera.requestId]);
+    expect(primera.requestId).toMatch(/^REQ-[A-Z0-9]{6}$/);
   });
 
   test('un llamador sin el secreto interno es rechazado y no escribe nada', async () => {
@@ -298,7 +400,7 @@ describe('quotes.getUserQuotes', () => {
 
   test('un Customer autenticado ve la suya y no la de otro Customer', async () => {
     const t = convexTest(schema, modules);
-    await seedPricingRule(t);
+    await seedRule(t);
     const ana = await seedCustomer(t, 'user_ana', 'Ana');
     const beto = await seedCustomer(t, 'user_beto', 'Beto');
 

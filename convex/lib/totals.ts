@@ -21,8 +21,13 @@ export interface Totals {
   totalUSD: number;
 }
 
-/** Redondea a centavos, que es la unidad en la que se cotiza. */
-function toCents(value: number): number {
+/**
+ * Redondea a centavos, que es la unidad en la que se cotiza. Vive aquí y no en
+ * el módulo de precios porque los totales se derivan de precios ya redondeados:
+ * dos definiciones distintas del centavo descuadrarían contra una orden de
+ * compra.
+ */
+export function toCents(value: number): number {
   return Math.round(value * 100) / 100;
 }
 

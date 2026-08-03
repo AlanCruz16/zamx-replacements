@@ -2,19 +2,13 @@ import { mutation, query, internalMutation } from './_generated/server';
 import { v } from 'convex/values';
 import { computeTotals } from './lib/totals';
 import { isPricedOutcome, type Outcome } from './lib/outcome';
+import { drawSuggestedPrice, matchPricingRule } from './lib/pricing';
+import { SUGGESTED_DELIVERY_WEEKS } from './lib/delivery';
+import { allocateRequestId } from './lib/request-id';
 import type { Doc } from './_generated/dataModel';
+import type { MutationCtx } from './_generated/server';
 
 type Product = Doc<'quotes'>['products'][number];
-
-/**
- * Delivery Estimate sugerida por defecto, en semanas. La capacidad de fábrica la
- * gobierna, no el calendario: la tabla de temporadas se eliminó porque
- * contradecía la realidad por unas veinte semanas.
- *
- * El ticket 05 la mueve a configuración; aquí vive como constante para que la
- * eliminación de `delivery_seasons` no deje el camino de precios sin estimación.
- */
-const SUGGESTED_DELIVERY_WEEKS = { min: 25, max: 30 };
 
 /**
  * Devuelve el secreto interno configurado. Lanza si no está configurado, para que
@@ -56,27 +50,13 @@ export const create = mutation({
       throw new Error('Usuario no encontrado en la base de datos.');
     }
 
-    // 2. Fetch all pricing rules to memory (small table)
+    // 2. Leer la configuración: la tabla es pequeña y cabe en memoria.
     const pricingRules = await ctx.db.query('pricing_rules').collect();
 
-    // Sort rules by prefix length descending so more specific prefixes match first
-    const sortedRules = [...pricingRules].sort(
-      (a, b) => b.prefix.trim().length - a.prefix.trim().length
-    );
-
-    // 3. Process each product: a Suggested Price only where a Model Prefix matched
+    // 3. Aplicar las reglas. Un Model Prefix sin rango configurado no recibe
+    // Suggested Price: se deja ausente para que el Approver lo cotice a mano.
     const processedProducts: Product[] = args.products.map((product) => {
-      const rule = sortedRules.find(
-        (r) =>
-          product.model.trim().toUpperCase().startsWith(r.prefix.trim().toUpperCase()) && r.isActive
-      );
-
-      // Un Model Prefix sin rango configurado no tiene Suggested Price: se deja
-      // ausente para que el Approver lo cotice a mano. Inventar un número lo
-      // presentaría como una propuesta del sistema.
-      const suggestedPriceUSD = rule
-        ? Math.floor(Math.random() * (rule.maxPriceUSD - rule.minPriceUSD + 1)) + rule.minPriceUSD
-        : undefined;
+      const suggestedPriceUSD = drawSuggestedPrice(matchPricingRule(product.model, pricingRules));
 
       return {
         partNumber: product.partNumber,
@@ -89,8 +69,7 @@ export const create = mutation({
       };
     });
 
-    // Generate a friendly Request ID
-    const requestId = `REQ-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const requestId = await allocateRequestId(requestIdIsTaken(ctx));
     const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 30; // 30 days from now
 
     // 4. Save to database. Sin `outcome`: la Replacement Request nace en revisión.
@@ -111,6 +90,24 @@ export const create = mutation({
     };
   },
 });
+
+/**
+ * Si el código ya pertenece a una Replacement Request.
+ *
+ * La consulta y la inserción viven en la misma mutación, que en Convex es una
+ * transacción: si otra mutación insertara ese mismo código entre medias, el
+ * conjunto de lectura entraría en conflicto y ésta se reintentaría entera.
+ */
+function requestIdIsTaken(ctx: MutationCtx) {
+  return async (requestId: string) => {
+    const taken = await ctx.db
+      .query('quotes')
+      .withIndex('by_request_id', (q) => q.eq('requestId', requestId))
+      .first();
+
+    return taken !== null;
+  };
+}
 
 /** Totales sobre los Suggested Prices que existen. Vista del Approver. */
 function suggestedTotals(products: readonly Product[]) {
