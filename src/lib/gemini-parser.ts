@@ -9,7 +9,7 @@ Eres un sistema de ZIEHL-ABEGG México. Analiza la respuesta del empleado a una 
 
 Solicitud original:
 - Productos: ${JSON.stringify(quote.products, null, 2)}
-- Tiempo de entrega propuesto: ${quote.products[0]?.deliveryWeeks} semanas
+- Tiempo de entrega propuesto: ${quote.products[0]?.suggestedDeliveryWeeksMin} a ${quote.products[0]?.suggestedDeliveryWeeksMax} semanas
 
 Respuesta del empleado: "${employeeText}"
 

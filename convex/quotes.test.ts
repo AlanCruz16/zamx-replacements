@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from 'convex-test';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { api } from './_generated/api';
+import { api, internal } from './_generated/api';
 import schema from './schema';
 
 /**
@@ -26,10 +26,9 @@ const modules = import.meta.glob('./**/*.ts');
 const INTERNAL_SECRET = 'secreto-de-prueba';
 
 /**
- * El rango de la regla es deliberadamente disjunto del rango inventado
- * (2500–3000 USD) que `create` usa hoy cuando ningún Model Prefix coincide, de
- * modo que un precio fabricado hace fallar la aserción de rango en vez de
- * colarse por debajo de ella.
+ * El rango de la regla es deliberadamente disjunto del rango (2500–3000 USD) que
+ * `create` inventaba cuando ningún Model Prefix coincidía, de modo que un precio
+ * fabricado hace fallar la aserción de rango en vez de colarse por debajo de ella.
  */
 const PRICING_RULE = {
   prefix: 'MK',
@@ -84,8 +83,13 @@ async function seed(t: TestConvex) {
 }
 
 /** Crea una Replacement Request como el llamador interno. */
-function createQuote(t: TestConvex, clerkId: string, secret = INTERNAL_SECRET) {
-  return t.mutation(api.quotes.create, { clerkId, secret, products: [PRODUCT] });
+function createQuote(
+  t: TestConvex,
+  clerkId: string,
+  secret = INTERNAL_SECRET,
+  products = [PRODUCT]
+) {
+  return t.mutation(api.quotes.create, { clerkId, secret, products });
 }
 
 /** Afirma que un Suggested Price cae dentro del rango de la regla sembrada. */
@@ -102,7 +106,31 @@ describe('quotes.create', () => {
     const result = await createQuote(t, clerkId);
 
     expect(result.products).toHaveLength(1);
-    expectWithinSeededRange(result.products[0].pricePerUnitUSD);
+    expectWithinSeededRange(result.products[0].suggestedPriceUSD!);
+  });
+
+  test('un Model Prefix sin regla configurada no recibe Suggested Price', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    const result = await createQuote(t, clerkId, INTERNAL_SECRET, [
+      { ...PRODUCT, model: 'XX999-SIN-REGLA' },
+    ]);
+
+    // La ausencia es el dato: significa "no cotizable", no "gratis". Un número
+    // inventado aquí se presentaría como una propuesta del sistema.
+    expect(result.products[0].suggestedPriceUSD).toBeUndefined();
+  });
+
+  test('una Replacement Request nace sin Outcome, que es lo que significa en revisión', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    const result = await createQuote(t, clerkId);
+    const stored = await t.run(async (ctx) => ctx.db.get(result.quoteId));
+
+    expect(stored!.outcome).toBeUndefined();
+    expect(stored!.customerNotifiedAt).toBeUndefined();
   });
 
   test('escribe la Replacement Request con un requestId REQ- y el precio sorteado', async () => {
@@ -114,7 +142,7 @@ describe('quotes.create', () => {
 
     expect(stored).not.toBeNull();
     expect(stored!.requestId).toMatch(/^REQ-[A-Z0-9]+$/);
-    expectWithinSeededRange(stored!.products[0].pricePerUnitUSD);
+    expectWithinSeededRange(stored!.products[0].suggestedPriceUSD!);
   });
 
   test('un llamador sin el secreto interno es rechazado y no escribe nada', async () => {
@@ -125,6 +153,138 @@ describe('quotes.create', () => {
 
     const quotes = await t.run(async (ctx) => ctx.db.query('quotes').collect());
     expect(quotes).toEqual([]);
+  });
+});
+
+describe('el Confirmed Price no toca el Suggested Price', () => {
+  test('un override escribe el Confirmed Price y deja intacto el Suggested Price', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+    const suggested = creada.products[0].suggestedPriceUSD!;
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      classification: 'modified',
+      explanation: 'Ajusto el precio de esta pieza.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 5555 }],
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    // Los dos precios conviven: la distancia entre ellos es la única evidencia
+    // de si los rangos configurados sirven de algo.
+    expect(stored!.products[0].confirmedPriceUSD).toBe(5555);
+    expect(stored!.products[0].suggestedPriceUSD).toBe(suggested);
+    expect(stored!.outcome).toBe('priced_differently');
+    expect(stored!.approverExplanation).toBe('Ajusto el precio de esta pieza.');
+  });
+
+  test('aprobar sin cambios copia el Suggested Price al Confirmed Price', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+    const suggested = creada.products[0].suggestedPriceUSD!;
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      classification: 'approved',
+      explanation: 'Precios correctos, adelante.',
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.products[0].confirmedPriceUSD).toBe(suggested);
+    expect(stored!.products[0].suggestedPriceUSD).toBe(suggested);
+    expect(stored!.outcome).toBe('priced_as_suggested');
+  });
+
+  test('aprobar sin cambios ignora cualquier precio suelto en la respuesta', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+    const suggested = creada.products[0].suggestedPriceUSD!;
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      classification: 'approved',
+      explanation: 'Todo correcto.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 9999 }],
+      newDeliveryWeeks: 4,
+    });
+
+    // "Priced as suggested" tiene que significar exactamente eso: si el registro
+    // llevara 9999 estaría afirmando algo falso sobre lo que decidió el Approver.
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.outcome).toBe('priced_as_suggested');
+    expect(stored!.products[0].confirmedPriceUSD).toBe(suggested);
+    expect(stored!.products[0].confirmedDeliveryWeeksMin).toBe(
+      stored!.products[0].suggestedDeliveryWeeksMin
+    );
+  });
+
+  test('una pieza sin Suggested Price no gana un cero al aprobarse en bloque', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId, INTERNAL_SECRET, [
+      { ...PRODUCT, model: 'XX999-SIN-REGLA' },
+    ]);
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      classification: 'approved',
+      explanation: 'Adelante.',
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.products[0].confirmedPriceUSD).toBeUndefined();
+  });
+});
+
+describe('el Outcome y la notificación al Customer se mueven por separado', () => {
+  test('registrar un Outcome no marca al Customer como notificado', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      classification: 'obsolete',
+      explanation: 'Pieza descontinuada, sin reemplazo directo.',
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.outcome).toBe('discontinued');
+    expect(stored!.customerNotifiedAt).toBeUndefined();
+  });
+
+  test('notificar al Customer no inventa un Outcome', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    await t.mutation(api.quotes.markAsSentToClient, { quoteId: creada.quoteId });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.customerNotifiedAt).toEqual(expect.any(Number));
+    expect(stored!.outcome).toBeUndefined();
+  });
+
+  test('un Outcome que no produce cotización deja al Customer sin notificar', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    // Una clasificación que el intérprete no reconoce no debe producir Outcome:
+    // la Replacement Request sigue en revisión, que es lo que significa su
+    // ausencia.
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      classification: 'no-se-entiende',
+      explanation: 'Respuesta ambigua.',
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.outcome).toBeUndefined();
+    expect(stored!.products[0].confirmedPriceUSD).toBeUndefined();
   });
 });
 

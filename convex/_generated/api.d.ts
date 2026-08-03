@@ -12,6 +12,7 @@ import type * as crons from '../crons.js';
 import type * as emails from '../emails.js';
 import type * as http from '../http.js';
 import type * as init from '../init.js';
+import type * as lib_totals from '../lib/totals.js';
 import type * as quotes from '../quotes.js';
 import type * as users from '../users.js';
 
@@ -22,6 +23,7 @@ declare const fullApi: ApiFromModules<{
   emails: typeof emails;
   http: typeof http;
   init: typeof init;
+  'lib/totals': typeof lib_totals;
   quotes: typeof quotes;
   users: typeof users;
 }>;

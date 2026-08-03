@@ -13,10 +13,13 @@ import {
   Link,
 } from 'react-email';
 
+/** Los Outcomes que se le comunican al Customer sin Quote Document. */
+export type NotifiableOutcome = 'oem_restricted' | 'discontinued' | 'blocked_pending_info';
+
 interface RejectedQuoteEmailProps {
   fullName: string;
   quoteId: string;
-  status: 'oem_exclusive' | 'obsolete' | 'needs_info' | 'rejected';
+  outcome: NotifiableOutcome;
   explanation?: string;
   baseUrl?: string;
 }
@@ -24,35 +27,31 @@ interface RejectedQuoteEmailProps {
 export const RejectedQuoteEmail = ({
   fullName = 'Cliente',
   quoteId = 'REQ-0000',
-  status = 'rejected',
+  outcome,
   explanation = '',
   baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000',
 }: RejectedQuoteEmailProps) => {
   const getReasonTitle = () => {
-    switch (status) {
-      case 'oem_exclusive':
+    switch (outcome) {
+      case 'oem_restricted':
         return 'Información sobre su equipo exclusivo (OEM)';
-      case 'obsolete':
+      case 'discontinued':
         return 'Aviso de obsolescencia de equipo';
-      case 'needs_info':
+      case 'blocked_pending_info':
         return 'Requerimos más información para su cotización';
-      case 'rejected':
-        return 'Actualización sobre su solicitud de cotización';
       default:
         return 'Actualización de Cotización';
     }
   };
 
   const getReasonMessage = () => {
-    switch (status) {
-      case 'oem_exclusive':
+    switch (outcome) {
+      case 'oem_restricted':
         return 'Después de revisar su solicitud, hemos identificado que el modelo o número de parte solicitado es un diseño exclusivo para el fabricante original del equipo (OEM). Por políticas de distribución, debe contactar directamente al fabricante de su máquina para obtener este reemplazo.';
-      case 'obsolete':
+      case 'discontinued':
         return 'Lamentamos informarle que el equipo que ha solicitado se encuentra obsoleto y ha sido descontinuado de nuestro catálogo.';
-      case 'needs_info':
+      case 'blocked_pending_info':
         return 'Para poder ofrecerle el reemplazo correcto y garantizar la compatibilidad, necesitamos que nos proporcione información adicional, preferentemente una fotografía clara de la placa de datos técnicos del ventilador actual.';
-      case 'rejected':
-        return 'Su solicitud ha sido revisada por nuestro equipo de ventas, pero lamentablemente no podemos procesar una cotización en este momento.';
       default:
         return '';
     }
@@ -93,7 +92,7 @@ export const RejectedQuoteEmail = ({
               )}
             </Section>
 
-            {status === 'needs_info' && (
+            {outcome === 'blocked_pending_info' && (
               <Section className="text-center my-8">
                 <Link
                   href={`${baseUrl}`}

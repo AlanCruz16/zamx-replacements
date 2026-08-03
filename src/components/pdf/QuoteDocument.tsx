@@ -166,7 +166,8 @@ interface QuoteDocumentProps {
     quantity: number;
     priceUSD: number;
     subtotalUSD: number;
-    deliveryWeeks: number;
+    deliveryWeeksMin: number;
+    deliveryWeeksMax: number;
   }[];
   subtotal: number;
   iva: number;
@@ -191,7 +192,16 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
   baseUrl,
 }) => {
   const logoUrl = `${baseUrl}/logo_final.png`;
-  const deliveryWeeks = products.length > 0 ? products[0].deliveryWeeks : 8;
+  // La Delivery Estimate se cotiza como rango de semanas enteras, y es de cada
+  // pieza: colapsar rangos distintos a un mínimo y un máximo globales anunciaría
+  // un rango que ninguna pieza tiene.
+  const sharedDelivery = products.every(
+    (p) =>
+      p.deliveryWeeksMin === products[0].deliveryWeeksMin &&
+      p.deliveryWeeksMax === products[0].deliveryWeeksMax
+  )
+    ? products[0]
+    : undefined;
 
   return (
     <Document>
@@ -290,7 +300,21 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
         </View>
 
         {/* DELIVERY TIME */}
-        <Text style={styles.deliveryText}>Tiempo de entrega: {deliveryWeeks} semana(s)</Text>
+        {sharedDelivery ? (
+          <Text style={styles.deliveryText}>
+            Tiempo de entrega: {sharedDelivery.deliveryWeeksMin} a {sharedDelivery.deliveryWeeksMax}{' '}
+            semanas
+          </Text>
+        ) : (
+          <View>
+            {products.map((p, index) => (
+              <Text key={index} style={styles.deliveryText}>
+                Tiempo de entrega {p.partNumber}: {p.deliveryWeeksMin} a {p.deliveryWeeksMax}{' '}
+                semanas
+              </Text>
+            ))}
+          </View>
+        )}
 
         {/* TOTALS */}
         <View style={styles.totalsContainer}>

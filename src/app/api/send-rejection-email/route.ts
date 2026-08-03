@@ -15,9 +15,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { quoteId, status, explanation } = await req.json();
+    const { quoteId, outcome, explanation } = await req.json();
 
-    if (!quoteId || !status) {
+    if (!quoteId || !outcome) {
       return NextResponse.json({ success: false, error: 'Faltan datos' }, { status: 400 });
     }
 
@@ -41,8 +41,8 @@ export async function POST(req: Request) {
       React.createElement(RejectedQuoteEmail, {
         fullName: user.fullName,
         quoteId: quote.requestId || quoteId,
-        status: status,
-        explanation: explanation || quote.employeeExplanation,
+        outcome,
+        explanation: explanation || quote.approverExplanation,
         baseUrl,
       })
     );

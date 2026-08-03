@@ -17,9 +17,10 @@ interface Product {
   model: string;
   quantity: number;
   deliveryLocation: string;
-  pricePerUnitUSD: number;
-  deliveryWeeks: number;
-  isUnknownPrefix?: boolean;
+  /** Ausente => ningún Model Prefix coincidió: el Approver debe poner precio a mano. */
+  suggestedPriceUSD?: number;
+  suggestedDeliveryWeeksMin: number;
+  suggestedDeliveryWeeksMax: number;
 }
 
 interface QuoteRequestEmailProps {
@@ -82,13 +83,17 @@ export const QuoteRequestTemplate = ({
                   <strong>Lugar de Entrega:</strong> {product.deliveryLocation}
                 </Text>
                 <Text className="text-gray-600 text-[13px] leading-[20px] m-0 italic">
-                  * Precio sugerido: ${product.pricePerUnitUSD} USD | Entrega est.:{' '}
-                  {product.deliveryWeeks} semanas
+                  * Precio sugerido:{' '}
+                  {product.suggestedPriceUSD === undefined
+                    ? '—'
+                    : `$${product.suggestedPriceUSD.toFixed(2)} USD`}{' '}
+                  | Entrega est.: {product.suggestedDeliveryWeeksMin}–
+                  {product.suggestedDeliveryWeeksMax} semanas
                 </Text>
-                {product.isUnknownPrefix && (
+                {product.suggestedPriceUSD === undefined && (
                   <Text className="text-amber-600 text-[13px] leading-[20px] m-0 font-semibold mt-1">
-                    ⚠️ Atención: El número de parte / modelo no está en la lógica estándar de
-                    precios.
+                    ⚠️ Sin precio sugerido: el modelo no coincide con ningún rango de precios
+                    configurado. Responde con un precio para esta pieza.
                   </Text>
                 )}
                 <Hr className="border border-solid border-gray-100 my-[10px] mx-0" />
@@ -105,6 +110,11 @@ export const QuoteRequestTemplate = ({
               <Text className="text-black text-[16px] leading-[24px] font-bold mt-2 mb-0">
                 Total estimado: ${totalUSD.toFixed(2)} USD
               </Text>
+              {products.some((p) => p.suggestedPriceUSD === undefined) && (
+                <Text className="text-amber-600 text-[13px] leading-[20px] mt-2 mb-0">
+                  Estos totales excluyen las piezas sin precio sugerido.
+                </Text>
+              )}
             </Section>
 
             <Text className="text-black text-[14px] leading-[24px] mt-6">

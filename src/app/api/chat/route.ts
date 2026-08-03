@@ -104,7 +104,7 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
                 react: QuoteRequestTemplate({
                   requestId: result.requestId,
                   userName,
-                  products: result.products || products,
+                  products: result.products,
                   subtotalUSD: result.subtotalUSD,
                   taxUSD: result.taxUSD,
                   totalUSD: result.totalUSD,
@@ -116,12 +116,13 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
               // We don't fail the chat if the email fails
             }
 
+            // Sin cifras: los totales de arriba son Suggested Prices, que el
+            // Customer no debe ver nunca. Sólo se le confirma el folio.
             return {
               success: true,
               message: 'Datos recibidos y cotización generada exitosamente.',
               quoteId: result.quoteId,
               requestId: result.requestId,
-              totalUSD: result.totalUSD,
             };
           } catch (error) {
             console.error('Error al procesar la cotización en Convex:', error);

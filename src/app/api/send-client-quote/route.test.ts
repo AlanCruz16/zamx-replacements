@@ -71,13 +71,13 @@ function quoteDetails() {
           model: 'MK137-4DZ.07.U',
           quantity: 2,
           deliveryLocation: 'Monterrey',
-          pricePerUnitUSD: 3125,
-          deliveryWeeks: 8,
+          suggestedPriceUSD: 3000,
+          confirmedPriceUSD: 3125,
+          suggestedDeliveryWeeksMin: 25,
+          suggestedDeliveryWeeksMax: 30,
         },
       ],
-      subtotalUSD: 6250,
-      taxUSD: 1000,
-      totalUSD: 7250,
+      outcome: 'priced_differently',
     },
     user: {
       fullName: 'Ana Cliente',
@@ -172,5 +172,20 @@ describe('POST /api/send-client-quote', () => {
     expect(adjunto.content.subarray(0, 5).toString()).toBe('%PDF-');
 
     expect(convexMutation).toHaveBeenCalledOnce();
+  });
+
+  test('sin Confirmed Price no se produce Quote Document ni se cotiza la pieza a cero', async () => {
+    const detalles = quoteDetails();
+    delete (detalles.quote.products[0] as { confirmedPriceUSD?: number }).confirmedPriceUSD;
+    convexQuery.mockResolvedValue(detalles);
+    const POST = await loadHandler();
+
+    const res = await POST(
+      request({ 'x-internal-secret': INTERNAL_SECRET }, { quoteId: 'REQ-V59X9B' })
+    );
+
+    expect(res.status).toBe(409);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(convexMutation).not.toHaveBeenCalled();
   });
 });

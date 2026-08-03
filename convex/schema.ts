@@ -1,6 +1,22 @@
 import { defineSchema, defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
+/**
+ * Outcome — lo que decidió el Approver. Su **ausencia** significa que la
+ * Replacement Request sigue en revisión: no existe un literal `awaiting_review`,
+ * porque el glosario define la espera como la ausencia de decisión.
+ *
+ * Es independiente de `customerNotifiedAt`: ninguna superficie puede inferir uno
+ * a partir del otro.
+ */
+export const outcomeValidator = v.union(
+  v.literal('priced_as_suggested'),
+  v.literal('priced_differently'),
+  v.literal('oem_restricted'),
+  v.literal('discontinued'),
+  v.literal('blocked_pending_info')
+);
+
 export default defineSchema({
   users: defineTable({
     clerkId: v.string(),
@@ -19,14 +35,6 @@ export default defineSchema({
     isActive: v.boolean(),
   }).index('by_prefix', ['prefix']),
 
-  delivery_seasons: defineTable({
-    seasonName: v.string(),
-    startMonth: v.number(),
-    endMonth: v.number(),
-    deliveryWeeks: v.number(),
-    isActive: v.boolean(),
-  }),
-
   quotes: defineTable({
     userId: v.id('users'),
     requestId: v.string(),
@@ -36,29 +44,63 @@ export default defineSchema({
         model: v.string(),
         quantity: v.number(),
         deliveryLocation: v.string(),
-        pricePerUnitUSD: v.number(),
-        deliveryWeeks: v.number(),
-        isUnknownPrefix: v.optional(v.boolean()),
+        /** Ausente => ningún Model Prefix coincidió, el producto no es cotizable. */
+        suggestedPriceUSD: v.optional(v.number()),
+        /** Ausente => todavía no existe un precio. NUNCA se lee como cero. */
+        confirmedPriceUSD: v.optional(v.number()),
+        suggestedDeliveryWeeksMin: v.number(),
+        suggestedDeliveryWeeksMax: v.number(),
+        confirmedDeliveryWeeksMin: v.optional(v.number()),
+        confirmedDeliveryWeeksMax: v.optional(v.number()),
       })
     ),
-    subtotalUSD: v.number(),
-    taxUSD: v.number(),
-    totalUSD: v.number(),
-    status: v.union(
-      v.literal('pending_review'),
-      v.literal('employee_approved'),
-      v.literal('employee_modified'),
-      v.literal('oem_exclusive'),
-      v.literal('obsolete'),
-      v.literal('needs_info'),
-      v.literal('sent_to_customer'),
-      v.literal('rejected')
-    ),
-    employeeExplanation: v.optional(v.string()),
-    pdfStorageId: v.optional(v.id('_storage')),
-    sentToClientAt: v.optional(v.number()),
+    /** Ausente => en revisión. Ver `outcomeValidator`. */
+    outcome: v.optional(outcomeValidator),
+    /** Las palabras del propio Approver, conservadas junto al Outcome. */
+    approverExplanation: v.optional(v.string()),
+    /** Cuándo se le dijo algo al Customer, sea lo que sea. Independiente del Outcome. */
+    customerNotifiedAt: v.optional(v.number()),
     expiresAt: v.number(),
   })
     .index('by_user_id', ['userId'])
     .index('by_request_id', ['requestId']),
+
+  /**
+   * Conversaciones del chat (ticket 21). Se definen aquí para que el esquema se
+   * asiente en un solo commit; el ticket 21 las llena.
+   *
+   * `submittedQuoteId` presente => la conversación ya produjo una Replacement
+   * Request y queda de solo lectura, para que `submit_quote_request` no pueda
+   * dispararse dos veces por las mismas piezas.
+   */
+  chat_sessions: defineTable({
+    userId: v.id('users'),
+    lastMessageAt: v.number(),
+    submittedQuoteId: v.optional(v.id('quotes')),
+  }).index('by_user_id', ['userId']),
+
+  /**
+   * Mensajes del chat. Se guarda `parts[]` tal cual lo produce el AI SDK v6 —
+   * aplanarlo a un `content` perdería las tool parts, que es como se renderiza
+   * la confirmación de la Replacement Request.
+   */
+  chat_messages: defineTable({
+    sessionId: v.id('chat_sessions'),
+    /** El `id` del UIMessage del AI SDK, para reconciliar reenvíos. */
+    messageId: v.string(),
+    role: v.union(v.literal('user'), v.literal('assistant'), v.literal('system')),
+    parts: v.array(v.any()),
+  }).index('by_session_id', ['sessionId']),
+
+  /**
+   * Ventanas de rate limiting (ticket 19). La cuenta vive en Convex, no en la
+   * memoria del route handler: la ruta es una función serverless y un contador
+   * en proceso no sobrevive entre invocaciones ni se comparte entre instancias.
+   */
+  rate_limit_windows: defineTable({
+    /** Identidad de Clerk más el nombre del recurso limitado. */
+    key: v.string(),
+    windowStartedAt: v.number(),
+    count: v.number(),
+  }).index('by_key', ['key']),
 });

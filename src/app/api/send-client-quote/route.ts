@@ -5,6 +5,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { api } from '../../../../convex/_generated/api';
 import { QuoteDocument } from '@/components/pdf/QuoteDocument';
 import { ClientQuoteEmail } from '@/emails/ClientQuoteEmail';
+import { confirmedQuoteLines } from '@/lib/confirmed-prices';
 import { render } from 'react-email';
 import React from 'react';
 
@@ -37,7 +38,19 @@ export async function POST(req: Request) {
 
     const { quote, user } = data;
 
-    // 2. Preparar los datos para el PDF
+    // 2. Preparar los datos para el PDF. Sin Confirmed Price en todas las piezas
+    // no hay Quote Document: un precio ausente no es cero.
+    const lines = confirmedQuoteLines(quote.products);
+    if (!lines) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'La solicitud no tiene un precio confirmado para todas sus piezas',
+        },
+        { status: 409 }
+      );
+    }
+
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
     const date = new Date(quote._creationTime).toLocaleDateString('es-MX');
     const validUntil = new Date(quote.expiresAt).toLocaleDateString('es-MX');
@@ -52,18 +65,10 @@ export async function POST(req: Request) {
         fullName: user.fullName,
         deliveryLocation: quote.products[0]?.deliveryLocation || '',
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      products: quote.products.map((p: any) => ({
-        partNumber: p.partNumber,
-        model: p.model || '',
-        quantity: p.quantity,
-        priceUSD: p.pricePerUnitUSD || 0,
-        subtotalUSD: (p.pricePerUnitUSD || 0) * p.quantity,
-        deliveryWeeks: p.deliveryWeeks || 8,
-      })),
-      subtotal: quote.subtotalUSD,
-      iva: quote.taxUSD || 0,
-      total: quote.totalUSD || 0,
+      products: lines.products,
+      subtotal: lines.totals.subtotalUSD,
+      iva: lines.totals.taxUSD,
+      total: lines.totals.totalUSD,
       employeeName: 'Ventas ZAMX',
       employeeEmail: 'cotizaciones@ziehl-abegg.com.mx',
       baseUrl,

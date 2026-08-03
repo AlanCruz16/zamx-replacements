@@ -252,40 +252,34 @@ export const seedData = internalMutation({
       await ctx.db.insert('pricing_rules', rule);
     }
     console.log('Pricing rules seeded successfully with specific prefixes.');
+  },
+});
 
-    // Check if we already seeded delivery seasons
-    const existingSeasons = await ctx.db.query('delivery_seasons').take(1);
-    if (existingSeasons.length === 0) {
-      const seasons = [
-        {
-          seasonName: 'Temporada Alta (Verano)',
-          startMonth: 5,
-          endMonth: 8,
-          deliveryWeeks: 8,
-          isActive: true,
-        },
-        {
-          seasonName: 'Temporada Regular',
-          startMonth: 9,
-          endMonth: 12,
-          deliveryWeeks: 5,
-          isActive: true,
-        },
-        {
-          seasonName: 'Temporada Baja (Invierno/Primavera)',
-          startMonth: 1,
-          endMonth: 4,
-          deliveryWeeks: 4,
-          isActive: true,
-        },
-      ];
-
-      for (const season of seasons) {
-        await ctx.db.insert('delivery_seasons', season);
+/**
+ * Borra todas las Replacement Requests.
+ *
+ * El cambio de forma del esquema (dos precios, dos rangos de entrega, Outcome
+ * separado de la notificación) es incompatible con los registros antiguos. Todos
+ * ellos son datos de prueba en un deployment de desarrollo, así que se limpian en
+ * vez de migrarse — no hay deployment de producción.
+ *
+ * Si `npx convex dev` rechaza el push por validación de esquema, limpia la tabla
+ * `quotes` desde el dashboard y vuelve a intentarlo; esta mutación existe para
+ * repetir la limpieza sin salir de la terminal.
+ */
+export const clearQuotes = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    // Por lotes, no `.collect()`: la tabla no tiene cota conocida.
+    let deleted = 0;
+    for (;;) {
+      const batch = await ctx.db.query('quotes').take(100);
+      if (batch.length === 0) break;
+      for (const quote of batch) {
+        await ctx.db.delete(quote._id);
       }
-      console.log('Delivery seasons seeded successfully.');
-    } else {
-      console.log('Delivery seasons already seeded.');
+      deleted += batch.length;
     }
+    console.log(`Deleted ${deleted} quotes.`);
   },
 });

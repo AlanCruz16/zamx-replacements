@@ -5,6 +5,7 @@ import { api, internal } from './_generated/api';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { parseEmployeeResponse } from '../src/lib/gemini-parser';
+import { isPricedOutcome } from './lib/outcome';
 
 export const checkInbox = internalAction({
   args: {},
@@ -97,9 +98,11 @@ export const checkInbox = internalAction({
           secret: internalSecret,
         });
         if (quote) {
-          if (quote.status !== 'pending_review') {
+          // Un Outcome presente significa que ya se decidió. Su ausencia — y sólo
+          // su ausencia — significa que sigue en revisión.
+          if (quote.outcome !== undefined) {
             console.log(
-              `La cotización ${msg.requestId} ya fue procesada (status: ${quote.status}).`
+              `La cotización ${msg.requestId} ya fue procesada (outcome: ${quote.outcome}).`
             );
             successfulUids.push(msg.uid);
             continue;
@@ -111,16 +114,15 @@ export const checkInbox = internalAction({
             finalClassification = 'pending_review';
           }
 
-          await ctx.runMutation(internal.quotes.processEmployeeResponse, {
+          const { outcome } = await ctx.runMutation(internal.quotes.processEmployeeResponse, {
             requestId: msg.requestId,
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            classification: finalClassification as any,
+            classification: finalClassification,
             explanation: interpretation.explanation,
             newPricesUSD: interpretation.newPricesUSD,
             newDeliveryWeeks: interpretation.newDeliveryWeeks,
           });
 
-          results.push({ requestId: msg.requestId, status: finalClassification });
+          results.push({ requestId: msg.requestId, outcome });
           successfulUids.push(msg.uid);
 
           const baseUrl = process.env.APP_URL;
@@ -130,12 +132,10 @@ export const checkInbox = internalAction({
                 `Omitiendo envío de PDF para ${msg.requestId} porque estamos en localhost (Convex nube no puede resolverlo).`
               );
             } else {
-              if (
-                finalClassification === 'employee_approved' ||
-                finalClassification === 'employee_modified' ||
-                finalClassification === 'approved' ||
-                finalClassification === 'modified'
-              ) {
+              // El Outcome decide a quién se le avisa. Sin Outcome (confianza
+              // baja o clasificación desconocida) no se avisa a nadie: la
+              // Replacement Request sigue en revisión.
+              if (isPricedOutcome(outcome)) {
                 await fetch(`${baseUrl}/api/send-client-quote`, {
                   method: 'POST',
                   headers: {
@@ -144,11 +144,7 @@ export const checkInbox = internalAction({
                   },
                   body: JSON.stringify({ quoteId: msg.requestId }),
                 }).catch((e) => console.error('Error trigger PDF:', e));
-              } else if (
-                ['oem_exclusive', 'obsolete', 'needs_info', 'rejected'].includes(
-                  finalClassification
-                )
-              ) {
+              } else if (outcome !== undefined) {
                 await fetch(`${baseUrl}/api/send-rejection-email`, {
                   method: 'POST',
                   headers: {
@@ -157,7 +153,7 @@ export const checkInbox = internalAction({
                   },
                   body: JSON.stringify({
                     quoteId: msg.requestId,
-                    status: finalClassification,
+                    outcome,
                     explanation: interpretation.explanation,
                   }),
                 }).catch((e) => console.error('Error trigger Rejection Email:', e));

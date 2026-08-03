@@ -3,7 +3,11 @@
 import React from 'react';
 import { useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
+import type { Doc } from '../../../convex/_generated/dataModel';
+import { confirmedQuoteLines } from '@/lib/confirmed-prices';
 import { X, FileText, Clock, CheckCircle, AlertCircle, Calendar, Download } from 'lucide-react';
+
+type Outcome = NonNullable<Doc<'quotes'>['outcome']>;
 
 interface QuotesModalProps {
   isOpen: boolean;
@@ -15,40 +19,49 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
 
   if (!isOpen) return null;
 
-  const getStatusBadge = (status: string, sent: boolean) => {
-    if (sent)
+  /**
+   * El Outcome y la notificación al Customer son dos hechos independientes, así
+   * que la insignia los lee por separado: qué decidió Ventas, y si ya se le avisó.
+   * Conflarlos es lo que mostraba una pieza descontinuada como cotización
+   * entregada.
+   */
+  const getOutcomeBadge = (outcome: Outcome | undefined, notified: boolean) => {
+    if (outcome === undefined)
       return {
-        label: 'Enviada al correo',
-        bg: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800/50',
-        icon: <CheckCircle size={14} className="mr-1" />,
+        label: 'En revisión por Ventas',
+        bg: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800/50',
+        icon: <Clock size={14} className="mr-1" />,
       };
 
-    switch (status) {
-      case 'pending_review':
+    switch (outcome) {
+      case 'priced_as_suggested':
+      case 'priced_differently':
+        return notified
+          ? {
+              label: 'Enviada al correo',
+              bg: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800/50',
+              icon: <CheckCircle size={14} className="mr-1" />,
+            }
+          : {
+              label: 'Procesando envío...',
+              bg: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800/50',
+              icon: <CheckCircle size={14} className="mr-1" />,
+            };
+      case 'oem_restricted':
         return {
-          label: 'En revisión por Ventas',
-          bg: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800/50',
-          icon: <Clock size={14} className="mr-1" />,
-        };
-      case 'employee_approved':
-      case 'employee_modified':
-      case 'sent_to_customer':
-        return {
-          label: 'Procesando envío...',
-          bg: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800/50',
-          icon: <CheckCircle size={14} className="mr-1" />,
-        };
-      case 'rejected':
-      case 'obsolete':
-      case 'oem_exclusive':
-        return {
-          label: 'Rechazada / Restringida',
+          label: 'Exclusiva del fabricante (OEM)',
           bg: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800/50',
           icon: <AlertCircle size={14} className="mr-1" />,
         };
-      default:
+      case 'discontinued':
         return {
-          label: 'Requiere atención',
+          label: 'Pieza descontinuada',
+          bg: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800/50',
+          icon: <AlertCircle size={14} className="mr-1" />,
+        };
+      case 'blocked_pending_info':
+        return {
+          label: 'Requiere más información',
           bg: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800/50',
           icon: <AlertCircle size={14} className="mr-1" />,
         };
@@ -110,7 +123,12 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
           ) : (
             <div className="space-y-4">
               {quotes.map((quote) => {
-                const badge = getStatusBadge(quote.status, !!quote.sentToClientAt);
+                const badge = getOutcomeBadge(quote.outcome, !!quote.customerNotifiedAt);
+                // Sólo los Confirmed Prices llegan al Customer, y un precio
+                // ausente significa que no hay precio: el total se calla entero
+                // hasta que todas las piezas tienen uno. Misma regla que el Quote
+                // Document, mismo módulo.
+                const lines = confirmedQuoteLines(quote.products);
                 const date = new Date(quote._creationTime).toLocaleDateString('es-MX', {
                   day: 'numeric',
                   month: 'short',
@@ -148,9 +166,9 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
                             <span className="text-gray-700 dark:text-gray-300 font-medium">
                               {p.quantity}x <span className="text-gray-500">{p.partNumber}</span>
                             </span>
-                            {quote.status !== 'pending_review' && p.pricePerUnitUSD > 0 && (
+                            {p.confirmedPriceUSD !== undefined && (
                               <span className="text-gray-500">
-                                {formatCurrency(p.pricePerUnitUSD * p.quantity)}
+                                {formatCurrency(p.confirmedPriceUSD * p.quantity)}
                               </span>
                             )}
                           </div>
@@ -162,13 +180,14 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
                       <div className="text-right">
                         <div className="text-sm text-gray-500 sm:mb-1">Total (c/ IVA)</div>
                         <div className="font-bold text-lg text-gray-900 dark:text-white">
-                          {quote.status === 'pending_review'
-                            ? '--'
-                            : formatCurrency(quote.totalUSD)}
+                          {lines === null ? '--' : formatCurrency(lines.totals.totalUSD)}
                         </div>
                       </div>
 
-                      {!!quote.sentToClientAt && (
+                      {/* Un Quote Document existe sólo cuando todas las piezas
+                          tienen Confirmed Price; haber avisado al Customer no
+                          basta, porque también se le avisa de un rechazo. */}
+                      {!!quote.customerNotifiedAt && lines !== null && (
                         <a
                           href={`/api/download-quote?quoteId=${quote.requestId}`}
                           target="_blank"
