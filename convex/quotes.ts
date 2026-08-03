@@ -5,6 +5,7 @@ import { isPricedOutcome, type Outcome } from './lib/outcome';
 import { drawSuggestedPrice, matchPricingRule } from './lib/pricing';
 import { SUGGESTED_DELIVERY_WEEKS } from './lib/delivery';
 import { allocateRequestId } from './lib/request-id';
+import { customerView } from './lib/customer-view';
 import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 
@@ -281,6 +282,10 @@ export const getFullQuoteDetails = internalQuery({
   },
 });
 
+/**
+ * La única superficie pública: las Replacement Requests del Customer que
+ * pregunta. Devuelve una proyección, no el registro — ver `lib/customer-view.ts`.
+ */
 export const getUserQuotes = query({
   args: {},
   handler: async (ctx) => {
@@ -304,6 +309,6 @@ export const getUserQuotes = query({
       .order('desc')
       .collect();
 
-    return quotes;
+    return quotes.map(customerView);
   },
 });

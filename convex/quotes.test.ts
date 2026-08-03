@@ -484,6 +484,48 @@ describe('quotes.getUserQuotes', () => {
       .query(api.quotes.getUserQuotes, {});
     expect(vistasPorBeto.map((q) => q.requestId)).toEqual([deBeto.requestId]);
   });
+
+  /**
+   * Ticket 07 — el Suggested Price no se oculta al pintar, no se envía. La
+   * aserción es sobre el payload serializado entero, no sobre que se haya
+   * llamado a una función de filtrado: si alguien ensancha la consulta y vuelve
+   * a devolver el registro completo, esto falla.
+   */
+  test('el payload de una Replacement Request en revisión no lleva ningún Suggested Price', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    const suggested = creada.products[0].suggestedPriceUSD!;
+    expectWithinSeededRange(suggested);
+
+    const vistas = await t.withIdentity({ subject: clerkId }).query(api.quotes.getUserQuotes, {});
+
+    expect(JSON.stringify(vistas)).not.toMatch(/suggested\w*price/i);
+    // Ni con otro nombre: el número sorteado tampoco viaja. Se mira sólo dentro
+    // de los productos, porque una marca de tiempo puede contener esos dígitos
+    // por casualidad y eso no sería una fuga.
+    expect(JSON.stringify(vistas[0].products)).not.toContain(String(suggested));
+  });
+
+  test('el Confirmed Price sí llega, y un cero es un precio, no una ausencia', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    // Una pieza genuinamente sin coste. Con un guardia `> 0` desaparecería.
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      classification: 'modified',
+      explanation: 'Va sin costo.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 0 }],
+    });
+
+    const [vista] = await t.withIdentity({ subject: clerkId }).query(api.quotes.getUserQuotes, {});
+
+    expect(vista.products[0].confirmedPriceUSD).toBe(0);
+    expect(JSON.stringify(vista)).not.toMatch(/suggested\w*price/i);
+  });
 });
 
 /**
