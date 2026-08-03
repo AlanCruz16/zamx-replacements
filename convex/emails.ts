@@ -4,10 +4,38 @@ import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
-import { parseEmployeeResponse } from '../src/lib/gemini-parser';
+import { interpretApproverReply } from '../src/lib/gemini-parser';
 import { isPricedOutcome } from './lib/outcome';
+import { screenInboundMessage, verdictForReply, type InboundMessage } from './lib/reply_verdict';
+import { approverAddresses } from './lib/approvers';
 import { requireInternalSecret } from '../src/lib/internal-secret';
 
+/** Un mensaje del buzón que ya pasó la criba, con lo que hace falta para juzgarlo. */
+type InboundReply = InboundMessage & { uid: number; requestId: string };
+
+/**
+ * De quién viene el mensaje, para la lista de Approvers.
+ *
+ * Se prefiere `Return-Path`, que es donde el servidor receptor deja el remitente
+ * real del sobre (el `MAIL FROM` de SMTP), sobre el `From:`, que lo escribe quien
+ * manda y por tanto se puede poner a gusto. Ninguno de los dos es prueba por sí
+ * solo: quien de verdad rechaza un remitente falsificado es el SPF/DKIM del
+ * proveedor del buzón, antes de que este sondeo vea nada.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function senderOf(parsed: any, headerFrom: string | undefined): string {
+  const returnPath = [parsed?.headers?.get('return-path')].flat()[0];
+  const envelopeFrom =
+    typeof returnPath === 'string' ? returnPath : returnPath?.value?.[0]?.address;
+
+  return envelopeFrom || headerFrom || '';
+}
+
+/**
+ * La cáscara de E/S: conecta al buzón, descarga, llama al intérprete y aplica lo
+ * que el veredicto decidió. Ninguna regla vive aquí — están en
+ * `lib/reply_verdict.ts`, fuera del alcance de IMAP, donde sí hay pruebas.
+ */
 export const checkInbox = internalAction({
   args: {},
   handler: async (ctx) => {
@@ -31,7 +59,14 @@ export const checkInbox = internalAction({
       logger: false,
     });
 
-    const messagesToProcess: { uid: number; requestId: string; textBody: string }[] = [];
+    const approvers = approverAddresses();
+    if (approvers.length === 0) {
+      console.warn(
+        'Sin APPROVER_EMAILS (ni ADMIN_EMAIL) configurado no hay lista de Approvers: ninguna respuesta se aplicará y los mensajes se quedarán sin leer.'
+      );
+    }
+
+    const messagesToProcess: InboundReply[] = [];
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const results: any[] = [];
 
@@ -41,17 +76,29 @@ export const checkInbox = internalAction({
       try {
         const messages = client.fetch({ seen: false }, { source: true, envelope: true, uid: true });
         for await (const message of messages) {
-          const subject = message.envelope?.subject || '';
-          const reqMatch = subject.match(/(REQ-[A-Z0-9]+)/i);
-          if (reqMatch && message.uid && message.source) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const parsed: any = await simpleParser(message.source as any);
-            messagesToProcess.push({
-              uid: message.uid,
-              requestId: reqMatch[1].toUpperCase(),
-              textBody: parsed.text || '',
-            });
+          if (!message.uid || !message.source) continue;
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const parsed: any = await simpleParser(message.source as any);
+          const inbound: InboundMessage = {
+            envelopeSender: senderOf(parsed, message.envelope?.from?.[0]?.address),
+            subject: message.envelope?.subject || '',
+            textBody: parsed.text || '',
+          };
+
+          // Ni un mensaje ignorado ni uno rechazado entra en `successfulUids`:
+          // los dos se quedan sin leer, que es lo que hace recuperable a un
+          // Approver legítimo que falte en la lista.
+          const screening = screenInboundMessage(inbound, approvers);
+          if (screening.kind === 'ignored') continue;
+          if (screening.kind === 'refused') {
+            console.warn(
+              `Respuesta a ${screening.requestId} descartada: ${screening.sender} no está en la lista de Approvers. Se deja sin leer.`
+            );
+            continue;
           }
+
+          messagesToProcess.push({ ...inbound, uid: message.uid, requestId: screening.requestId });
         }
       } finally {
         lock.release();
@@ -68,10 +115,7 @@ export const checkInbox = internalAction({
     }
 
     const successfulUids: number[] = [];
-    const uniqueMessagesMap = new Map<
-      string,
-      { uid: number; requestId: string; textBody: string }
-    >();
+    const uniqueMessagesMap = new Map<string, InboundReply>();
 
     for (const msg of messagesToProcess) {
       if (
@@ -106,18 +150,29 @@ export const checkInbox = internalAction({
             continue;
           }
 
-          const interpretation = await parseEmployeeResponse(quote, msg.textBody);
-          let finalClassification: string = interpretation.classification;
-          if (interpretation.confidence < 0.7) {
-            finalClassification = 'pending_review';
-          }
+          // El cuerpo entra al modelo como mensaje de usuario, nunca como
+          // instrucción, y lo que vuelve son datos crudos: quien decide es el
+          // veredicto, que es puro y sí está probado.
+          const interpretation = await interpretApproverReply(quote, msg.textBody);
+          const verdict = verdictForReply({
+            message: msg,
+            request: quote,
+            interpretation,
+            approverAddresses: approvers,
+          });
 
           const { outcome } = await ctx.runMutation(internal.quotes.processEmployeeResponse, {
             requestId: msg.requestId,
-            classification: finalClassification,
-            explanation: interpretation.explanation,
-            newPricesUSD: interpretation.newPricesUSD,
-            newDeliveryWeeks: interpretation.newDeliveryWeeks,
+            outcome: verdict.outcome,
+            explanation: verdict.explanation,
+            // Se mandan todos los precios extraídos, como hasta ahora. El
+            // ticket 10 es el que deja de aplicar los que el veredicto marcó
+            // fuera de banda y le contesta al Approver.
+            newPricesUSD: verdict.prices.map((p) => ({
+              partNumber: p.partNumber,
+              price: p.priceUSD,
+            })),
+            newDeliveryWeeks: verdict.deliveryWeeks,
           });
 
           results.push({ requestId: msg.requestId, outcome });
@@ -152,7 +207,7 @@ export const checkInbox = internalAction({
                   body: JSON.stringify({
                     requestId: msg.requestId,
                     outcome,
-                    explanation: interpretation.explanation,
+                    explanation: verdict.explanation,
                   }),
                 }).catch((e) => console.error('Error trigger Rejection Email:', e));
               }

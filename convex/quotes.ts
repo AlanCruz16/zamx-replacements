@@ -1,7 +1,8 @@
 import { query, internalMutation, internalQuery } from './_generated/server';
 import { v } from 'convex/values';
 import { computeTotals } from './lib/totals';
-import { isPricedOutcome, type Outcome } from './lib/outcome';
+import { isPricedOutcome } from './lib/outcome';
+import { outcomeValidator } from './schema';
 import { drawSuggestedPrice, matchPricingRule } from './lib/pricing';
 import { SUGGESTED_DELIVERY_WEEKS } from './lib/delivery';
 import { allocateRequestId } from './lib/request_id';
@@ -108,32 +109,16 @@ function suggestedTotals(products: readonly Product[]) {
   );
 }
 
-/**
- * Traduce la clasificación que devuelve el intérprete al Outcome del glosario.
- * Una clasificación desconocida no produce Outcome: la Replacement Request se
- * queda en revisión, que es exactamente lo que significa su ausencia.
- */
-function outcomeFor(classification: string): Outcome | undefined {
-  switch (classification) {
-    case 'approved':
-      return 'priced_as_suggested';
-    case 'modified':
-      return 'priced_differently';
-    case 'oem_exclusive':
-      return 'oem_restricted';
-    case 'obsolete':
-      return 'discontinued';
-    case 'needs_info':
-      return 'blocked_pending_info';
-    default:
-      return undefined;
-  }
-}
-
 export const processEmployeeResponse = internalMutation({
   args: {
     requestId: v.string(),
-    classification: v.string(),
+    /**
+     * El Outcome que produjo el veredicto, ya en el vocabulario del glosario.
+     * Ausente => no se llegó a una decisión y la Request sigue en revisión. El
+     * validador es el mismo del esquema, así que un valor que no sea un Outcome
+     * no llega hasta aquí en vez de traducirse a la callada.
+     */
+    outcome: v.optional(outcomeValidator),
     explanation: v.string(),
     newPricesUSD: v.optional(
       v.array(
@@ -156,7 +141,7 @@ export const processEmployeeResponse = internalMutation({
       throw new Error(`Cotización no encontrada para el request: ${args.requestId}`);
     }
 
-    const outcome = outcomeFor(args.classification);
+    const outcome = args.outcome;
 
     // 2. Confirmar precios y entregas. El Suggested Price nunca se toca: la
     // distancia entre lo propuesto y lo confirmado es la única evidencia de si

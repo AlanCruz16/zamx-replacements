@@ -333,7 +333,7 @@ describe('un Model Prefix sin rango configurado no produce Suggested Price', () 
     // cierto después de aquel ticket.
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'modified',
+      outcome: 'priced_differently',
       explanation: 'Cotizada a mano.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 8400 }],
     });
@@ -435,7 +435,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'modified',
+      outcome: 'priced_differently',
       explanation: 'Ajusto el precio de esta pieza.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 5555 }],
     });
@@ -457,7 +457,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'approved',
+      outcome: 'priced_as_suggested',
       explanation: 'Precios correctos, adelante.',
     });
 
@@ -475,7 +475,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'approved',
+      outcome: 'priced_as_suggested',
       explanation: 'Todo correcto.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 9999 }],
       newDeliveryWeeks: 4,
@@ -498,7 +498,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'approved',
+      outcome: 'priced_as_suggested',
       explanation: 'Adelante.',
     });
 
@@ -515,7 +515,7 @@ describe('el Outcome y la notificación al Customer se mueven por separado', () 
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'obsolete',
+      outcome: 'discontinued',
       explanation: 'Pieza descontinuada, sin reemplazo directo.',
     });
 
@@ -541,12 +541,11 @@ describe('el Outcome y la notificación al Customer se mueven por separado', () 
     const clerkId = await seed(t);
     const creada = await createQuote(t, clerkId);
 
-    // Una clasificación que el intérprete no reconoce no debe producir Outcome:
-    // la Replacement Request sigue en revisión, que es lo que significa su
-    // ausencia.
+    // Una respuesta que no se pudo interpretar no produce Outcome: la
+    // Replacement Request sigue en revisión, que es lo que significa su
+    // ausencia. Las palabras del Approver sí se guardan.
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'no-se-entiende',
       explanation: 'Respuesta ambigua.',
     });
 
@@ -616,7 +615,7 @@ describe('quotes.getUserQuotes', () => {
     // Una pieza genuinamente sin coste. Con un guardia `> 0` desaparecería.
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'modified',
+      outcome: 'priced_differently',
       explanation: 'Va sin costo.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 0 }],
     });
