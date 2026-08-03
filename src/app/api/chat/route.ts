@@ -2,12 +2,10 @@ import { streamText, tool, convertToModelMessages, type UIMessage, stepCountIs }
 import { google } from '@ai-sdk/google';
 import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
-import { ConvexHttpClient } from 'convex/browser';
-import { api } from '../../../../convex/_generated/api';
 import { Resend } from 'resend';
 import { QuoteRequestTemplate } from '@/emails/QuoteRequestTemplate';
+import { createReplacementRequest } from '@/lib/internal-api';
 
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Configura el tiempo máximo de espera para la API (útil en Edge)
@@ -88,11 +86,7 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
 
           try {
             // 1. Guardar la cotización en Convex
-            const result = await convex.mutation(api.quotes.create, {
-              clerkId,
-              secret: process.env.INTERNAL_API_SECRET!,
-              products,
-            });
+            const result = await createReplacementRequest({ clerkId, products });
 
             // 2. Enviar el email con Resend
             try {

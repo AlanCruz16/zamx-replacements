@@ -1,5 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
+import { authorizeInternalRequest } from '@/lib/internal-secret';
 
 // Define public routes (login/signup are handled by Clerk automatically if needed,
 // but we leave them public just in case. Webhooks must be public).
@@ -17,9 +18,9 @@ const isInternalApiRoute = createRouteMatcher([
 
 export default clerkMiddleware(async (auth, request) => {
   if (isInternalApiRoute(request)) {
-    const secret = request.headers.get('x-internal-secret');
-    if (secret !== process.env.INTERNAL_API_SECRET) {
-      return new NextResponse('Unauthorized', { status: 401 });
+    const denied = authorizeInternalRequest(request);
+    if (denied) {
+      return new NextResponse(denied.error, { status: denied.status });
     }
     return NextResponse.next();
   }

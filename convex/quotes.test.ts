@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { api, internal } from './_generated/api';
 import { SUGGESTED_DELIVERY_WEEKS } from './lib/delivery';
 import schema from './schema';
+import * as quotes from './quotes';
 
 /**
  * Ejemplo de referencia — Seam 1: la frontera de las funciones de Convex.
@@ -94,14 +95,13 @@ async function seed(t: TestConvex) {
   return seedCustomer(t, 'user_ana', 'Ana');
 }
 
-/** Crea una Replacement Request como el llamador interno. */
-function createQuote(
-  t: TestConvex,
-  clerkId: string,
-  secret = INTERNAL_SECRET,
-  products = [PRODUCT]
-) {
-  return t.mutation(api.quotes.create, { clerkId, secret, products });
+/**
+ * Crea una Replacement Request como el llamador interno. No lleva secreto: la
+ * mutación es interna, así que el único modo de alcanzarla es ya estar dentro
+ * de Convex, y el secreto se comprueba en la frontera HTTP.
+ */
+function createQuote(t: TestConvex, clerkId: string, products = [PRODUCT]) {
+  return t.mutation(internal.quotes.create, { clerkId, products });
 }
 
 /** Afirma que un Suggested Price cae dentro del rango de la regla sembrada. */
@@ -125,9 +125,7 @@ describe('quotes.create', () => {
     const t = convexTest(schema, modules);
     const clerkId = await seed(t);
 
-    const result = await createQuote(t, clerkId, INTERNAL_SECRET, [
-      { ...PRODUCT, model: 'XX999-SIN-REGLA' },
-    ]);
+    const result = await createQuote(t, clerkId, [{ ...PRODUCT, model: 'XX999-SIN-REGLA' }]);
 
     // La ausencia es el dato: significa "no cotizable", no "gratis". Un número
     // inventado aquí se presentaría como una propuesta del sistema.
@@ -175,9 +173,7 @@ describe('quotes.create', () => {
     const clerkId = await seedCustomer(t, 'user_ana', 'Ana');
     await seedRule(t, { prefix: '  ck  ', minPriceUSD: 7000, maxPriceUSD: 7100 });
 
-    const result = await createQuote(t, clerkId, INTERNAL_SECRET, [
-      { ...PRODUCT, model: ' ck900-2ez.10.c ' },
-    ]);
+    const result = await createQuote(t, clerkId, [{ ...PRODUCT, model: ' ck900-2ez.10.c ' }]);
 
     expect(result.products[0].suggestedPriceUSD).toBeGreaterThanOrEqual(7000);
     expect(result.products[0].suggestedPriceUSD).toBeLessThanOrEqual(7100);
@@ -204,7 +200,7 @@ describe('quotes.create', () => {
     // Veinte piezas ejercen el sorteo veinte veces sin tocar `Math.random`: lo
     // que se afirma vale para cualquier valor que salga, no para uno guionado.
     const products = Array.from({ length: 20 }, (_, i) => ({ ...PRODUCT, partNumber: `P-${i}` }));
-    const result = await createQuote(t, clerkId, INTERNAL_SECRET, products);
+    const result = await createQuote(t, clerkId, products);
 
     for (const { suggestedPriceUSD: price } of result.products) {
       expect(price).toBeGreaterThanOrEqual(1234.1);
@@ -247,16 +243,6 @@ describe('quotes.create', () => {
     expect(stored.map((q) => q.requestId)).toEqual([primera.requestId]);
     expect(primera.requestId).toMatch(/^REQ-[A-Z0-9]{6}$/);
   });
-
-  test('un llamador sin el secreto interno es rechazado y no escribe nada', async () => {
-    const t = convexTest(schema, modules);
-    const clerkId = await seed(t);
-
-    await expect(createQuote(t, clerkId, 'secreto-equivocado')).rejects.toThrow('No autorizado');
-
-    const quotes = await t.run(async (ctx) => ctx.db.query('quotes').collect());
-    expect(quotes).toEqual([]);
-  });
 });
 
 /** Afirma que un producto lleva la Delivery Estimate sugerida configurada. */
@@ -291,7 +277,7 @@ describe('la Delivery Estimate sugerida', () => {
     const clerkId = await seed(t);
 
     const products = Array.from({ length: 3 }, (_, i) => ({ ...PRODUCT, partNumber: `P-${i}` }));
-    const result = await createQuote(t, clerkId, INTERNAL_SECRET, products);
+    const result = await createQuote(t, clerkId, products);
     const stored = await t.run(async (ctx) => ctx.db.get(result.quoteId));
 
     // También sobre el registro escrito: el rango que ve el Approver en la
@@ -309,9 +295,7 @@ describe('la Delivery Estimate sugerida', () => {
 
     // No cotizable no es lo mismo que sin Delivery Estimate: el Approver necesita
     // el rango de fábrica para poder poner un precio a mano sobre él.
-    const result = await createQuote(t, clerkId, INTERNAL_SECRET, [
-      { ...PRODUCT, model: 'XX999-SIN-REGLA' },
-    ]);
+    const result = await createQuote(t, clerkId, [{ ...PRODUCT, model: 'XX999-SIN-REGLA' }]);
 
     expect(result.products[0].suggestedPriceUSD).toBeUndefined();
     expectConfiguredDeliveryRange(result.products[0]);
@@ -410,9 +394,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
   test('una pieza sin Suggested Price no gana un cero al aprobarse en bloque', async () => {
     const t = convexTest(schema, modules);
     const clerkId = await seed(t);
-    const creada = await createQuote(t, clerkId, INTERNAL_SECRET, [
-      { ...PRODUCT, model: 'XX999-SIN-REGLA' },
-    ]);
+    const creada = await createQuote(t, clerkId, [{ ...PRODUCT, model: 'XX999-SIN-REGLA' }]);
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
@@ -447,7 +429,7 @@ describe('el Outcome y la notificación al Customer se mueven por separado', () 
     const clerkId = await seed(t);
     const creada = await createQuote(t, clerkId);
 
-    await t.mutation(api.quotes.markAsSentToClient, { quoteId: creada.quoteId });
+    await t.mutation(internal.quotes.markQuoteDocumentSent, { quoteId: creada.quoteId });
 
     const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
     expect(stored!.customerNotifiedAt).toEqual(expect.any(Number));
@@ -501,5 +483,203 @@ describe('quotes.getUserQuotes', () => {
       .withIdentity({ subject: beto })
       .query(api.quotes.getUserQuotes, {});
     expect(vistasPorBeto.map((q) => q.requestId)).toEqual([deBeto.requestId]);
+  });
+});
+
+/**
+ * Ticket 06 — la autorización se reduce a dos reglas: la identidad de Clerk para
+ * el Customer, y el secreto interno en una cabecera para la máquina.
+ */
+describe('las funciones máquina a máquina no son alcanzables como públicas', () => {
+  /**
+   * `convex-test` no hace cumplir la visibilidad: `t.mutation` ejecuta cualquier
+   * función registrada, sea pública o interna. Lo que decide si un navegador
+   * puede alcanzarla es la propia registración, así que es sobre ella sobre lo
+   * que se afirma. Cambiar un `internalMutation` por `mutation` — que es
+   * exactamente la regresión que este ticket cierra — hace fallar esto.
+   */
+  const INTERNAS = [
+    'create',
+    'getByRequestId',
+    'getFullQuoteDetails',
+    'markQuoteDocumentSent',
+    'markRejectionExplained',
+    'processEmployeeResponse',
+  ] as const;
+
+  test.each(INTERNAS)('%s está registrada como interna', (name) => {
+    expect(quotes[name].isInternal).toBe(true);
+  });
+
+  test('la única función pública es la lectura del propio Customer', () => {
+    const publicas = Object.entries(quotes)
+      .filter(([, fn]) => (fn as { isPublic?: boolean }).isPublic)
+      .map(([name]) => name);
+
+    // Toda superficie pública nueva tiene que autorizar sobre la identidad de
+    // Clerk y comprobar la propiedad. Añadir una sin querer se ve aquí.
+    expect(publicas).toEqual(['getUserQuotes']);
+  });
+});
+
+describe('la frontera HTTP interna distingue la mala configuración de la denegación', () => {
+  function createRequest(headers: Record<string, string>, clerkId = 'user_ana') {
+    return {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ clerkId, products: [PRODUCT] }),
+    };
+  }
+
+  test('sin la cabecera del secreto responde 401 y no escribe nada', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t);
+
+    const res = await t.fetch('/internal/quotes/create', createRequest({}));
+
+    expect(res.status).toBe(401);
+    const almacenadas = await t.run(async (ctx) => ctx.db.query('quotes').collect());
+    expect(almacenadas).toEqual([]);
+  });
+
+  test('con el secreto equivocado responde 401', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t);
+
+    const res = await t.fetch(
+      '/internal/quotes/create',
+      createRequest({ 'x-internal-secret': 'secreto-equivocado' })
+    );
+
+    expect(res.status).toBe(401);
+  });
+
+  test('sin INTERNAL_API_SECRET configurado el error nombra la variable', async () => {
+    // El 2026-08-02 esta situación se presentó como «No autorizado» y costó una
+    // investigación entera. Se afirma el *mensaje*, no sólo el rechazo: es lo
+    // único que impide que las dos causas vuelvan a colapsar en una.
+    vi.stubEnv('INTERNAL_API_SECRET', '');
+    const t = convexTest(schema, modules);
+    await seed(t);
+
+    const res = await t.fetch(
+      '/internal/quotes/create',
+      createRequest({ 'x-internal-secret': INTERNAL_SECRET })
+    );
+
+    expect(res.status).not.toBe(401);
+    await expect(res.json()).resolves.toMatchObject({
+      error: expect.stringContaining('INTERNAL_API_SECRET'),
+    });
+  });
+
+  test('con el secreto correcto crea la Replacement Request', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t);
+
+    const res = await t.fetch(
+      '/internal/quotes/create',
+      createRequest({ 'x-internal-secret': INTERNAL_SECRET })
+    );
+
+    expect(res.status).toBe(200);
+    const { result } = await res.json();
+    expect(result.requestId).toMatch(/^REQ-[A-Z0-9]+$/);
+
+    const almacenadas = await t.run(async (ctx) => ctx.db.query('quotes').collect());
+    expect(almacenadas.map((q) => q.requestId)).toEqual([result.requestId]);
+  });
+});
+
+describe('el Quote Document enviado y el rechazo explicado son hechos distintos', () => {
+  test('cada mutación registra su propio hecho y no el del otro camino', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const conDocumento = await createQuote(t, clerkId);
+    const conRechazo = await createQuote(t, clerkId);
+
+    await t.mutation(internal.quotes.markQuoteDocumentSent, { quoteId: conDocumento.quoteId });
+    await t.mutation(internal.quotes.markRejectionExplained, { quoteId: conRechazo.quoteId });
+
+    const [documento, rechazo] = await t.run(async (ctx) => [
+      await ctx.db.get(conDocumento.quoteId),
+      await ctx.db.get(conRechazo.quoteId),
+    ]);
+
+    expect(documento!.quoteDocumentSentAt).toEqual(expect.any(Number));
+    expect(documento!.rejectionExplainedAt).toBeUndefined();
+
+    expect(rechazo!.rejectionExplainedAt).toEqual(expect.any(Number));
+    expect(rechazo!.quoteDocumentSentAt).toBeUndefined();
+
+    // Notificar sigue siendo independiente del Outcome, como fijó el ticket 03.
+    expect(documento!.customerNotifiedAt).toEqual(expect.any(Number));
+    expect(rechazo!.customerNotifiedAt).toEqual(expect.any(Number));
+    expect(documento!.outcome).toBeUndefined();
+    expect(rechazo!.outcome).toBeUndefined();
+  });
+
+  test('explicar un rechazo después no borra que el Quote Document salió', async () => {
+    // Es el caso que obliga a que sean dos hechos y no uno: una Replacement
+    // Request cotizada cuyo Approver corrige más tarde a descontinuada. Con un
+    // solo campo, el segundo aviso hacía desaparecer el primero.
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    await t.mutation(internal.quotes.markQuoteDocumentSent, { quoteId: creada.quoteId });
+    await t.mutation(internal.quotes.markRejectionExplained, { quoteId: creada.quoteId });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.quoteDocumentSentAt).toEqual(expect.any(Number));
+    expect(stored!.rejectionExplainedAt).toEqual(expect.any(Number));
+  });
+});
+
+describe('las demás rutas internas pasan por la misma frontera', () => {
+  const RUTAS = [
+    ['/internal/quotes/details', { requestId: 'REQ-ABC' }],
+    ['/internal/quotes/quote-document-sent', { quoteId: 'no-importa' }],
+    ['/internal/quotes/rejection-explained', { quoteId: 'no-importa' }],
+  ] as const;
+
+  test.each(RUTAS)('%s responde 401 sin la cabecera del secreto', async (path, body) => {
+    const t = convexTest(schema, modules);
+    await seed(t);
+
+    const res = await t.fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(401);
+  });
+
+  test('con el secreto correcto cada ruta alcanza su función interna', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    const post = (path: string, body: unknown) =>
+      t.fetch(path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-secret': INTERNAL_SECRET },
+        body: JSON.stringify(body),
+      });
+
+    const detalles = await post('/internal/quotes/details', { requestId: creada.requestId });
+    expect((await detalles.json()).result.quote.requestId).toBe(creada.requestId);
+
+    expect(
+      (await post('/internal/quotes/quote-document-sent', { quoteId: creada.quoteId })).status
+    ).toBe(200);
+    expect(
+      (await post('/internal/quotes/rejection-explained', { quoteId: creada.quoteId })).status
+    ).toBe(200);
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.quoteDocumentSentAt).toEqual(expect.any(Number));
+    expect(stored!.rejectionExplainedAt).toEqual(expect.any(Number));
   });
 });

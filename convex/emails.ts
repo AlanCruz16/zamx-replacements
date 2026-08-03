@@ -1,11 +1,12 @@
 'use node';
 
 import { internalAction } from './_generated/server';
-import { api, internal } from './_generated/api';
+import { internal } from './_generated/api';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { parseEmployeeResponse } from '../src/lib/gemini-parser';
 import { isPricedOutcome } from './lib/outcome';
+import { requireInternalSecret } from '../src/lib/internal-secret';
 
 export const checkInbox = internalAction({
   args: {},
@@ -15,11 +16,9 @@ export const checkInbox = internalAction({
       return;
     }
 
-    const internalSecret = process.env.INTERNAL_API_SECRET;
-    if (!internalSecret) {
-      console.error('INTERNAL_API_SECRET no configurado, no se pueden procesar respuestas');
-      return;
-    }
+    // Una variable ausente no es una denegación: se nombra, para que la causa se
+    // lea en el propio error en vez de disfrazarse de fallo del paso siguiente.
+    const internalSecret = requireInternalSecret();
 
     const client = new ImapFlow({
       host: process.env.IMAP_HOST,
@@ -93,9 +92,8 @@ export const checkInbox = internalAction({
     for (const msg of uniqueMessagesToProcess) {
       console.log(`Procesando email recibido para ${msg.requestId}`);
       try {
-        const quote = await ctx.runQuery(api.quotes.getByRequestId, {
+        const quote = await ctx.runQuery(internal.quotes.getByRequestId, {
           requestId: msg.requestId,
-          secret: internalSecret,
         });
         if (quote) {
           // Un Outcome presente significa que ya se decidió. Su ausencia — y sólo
@@ -142,7 +140,7 @@ export const checkInbox = internalAction({
                     'Content-Type': 'application/json',
                     'x-internal-secret': internalSecret,
                   },
-                  body: JSON.stringify({ quoteId: msg.requestId }),
+                  body: JSON.stringify({ requestId: msg.requestId }),
                 }).catch((e) => console.error('Error trigger PDF:', e));
               } else if (outcome !== undefined) {
                 await fetch(`${baseUrl}/api/send-rejection-email`, {
@@ -152,7 +150,7 @@ export const checkInbox = internalAction({
                     'x-internal-secret': internalSecret,
                   },
                   body: JSON.stringify({
-                    quoteId: msg.requestId,
+                    requestId: msg.requestId,
                     outcome,
                     explanation: interpretation.explanation,
                   }),

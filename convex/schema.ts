@@ -60,6 +60,14 @@ export default defineSchema({
     approverExplanation: v.optional(v.string()),
     /** Cuándo se le dijo algo al Customer, sea lo que sea. Independiente del Outcome. */
     customerNotifiedAt: v.optional(v.number()),
+    /**
+     * Los dos hechos concretos que puede haber detrás de esa notificación, cada
+     * uno en su propio campo para que no se pisen: una Replacement Request
+     * puede recibir su Quote Document y más tarde una explicación (o al revés),
+     * y con un solo campo el primer hecho se perdía.
+     */
+    quoteDocumentSentAt: v.optional(v.number()),
+    rejectionExplainedAt: v.optional(v.number()),
     expiresAt: v.number(),
   })
     .index('by_user_id', ['userId'])

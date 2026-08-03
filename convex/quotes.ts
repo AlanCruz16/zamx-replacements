@@ -1,4 +1,4 @@
-import { mutation, query, internalMutation } from './_generated/server';
+import { query, internalMutation, internalQuery } from './_generated/server';
 import { v } from 'convex/values';
 import { computeTotals } from './lib/totals';
 import { isPricedOutcome, type Outcome } from './lib/outcome';
@@ -11,21 +11,14 @@ import type { MutationCtx } from './_generated/server';
 type Product = Doc<'quotes'>['products'][number];
 
 /**
- * Devuelve el secreto interno configurado. Lanza si no está configurado, para que
- * una variable ausente nunca deje pasar a un llamador (undefined === undefined).
+ * Camino máquina a máquina: es `internalMutation`, así que no existe en la API
+ * pública y ningún navegador puede alcanzarla, mande lo que mande. El secreto
+ * interno se comprueba una sola vez, en la frontera HTTP (`convex/http.ts`), y
+ * nunca viaja como argumento de una función.
  */
-function requireInternalSecret(): string {
-  const secret = process.env.INTERNAL_API_SECRET;
-  if (!secret) {
-    throw new Error('INTERNAL_API_SECRET no está configurado');
-  }
-  return secret;
-}
-
-export const create = mutation({
+export const create = internalMutation({
   args: {
     clerkId: v.string(),
-    secret: v.string(),
     products: v.array(
       v.object({
         partNumber: v.string(),
@@ -36,10 +29,6 @@ export const create = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    if (args.secret !== process.env.INTERNAL_API_SECRET) {
-      throw new Error('No autorizado');
-    }
-
     // 1. Get the user from clerkId
     const user = await ctx.db
       .query('users')
@@ -213,54 +202,70 @@ export const processEmployeeResponse = internalMutation({
   },
 });
 
-export const getByRequestId = query({
-  args: { requestId: v.string(), secret: v.optional(v.string()) },
+/**
+ * Lectura interna por folio. La usa el poller de correo, que ya corre dentro de
+ * Convex; ninguna superficie del Customer pasa por aquí.
+ */
+export const getByRequestId = internalQuery({
+  args: { requestId: v.string() },
   handler: async (ctx, args) => {
-    const quote = await ctx.db
+    return await ctx.db
       .query('quotes')
       .withIndex('by_request_id', (q) => q.eq('requestId', args.requestId))
       .first();
-
-    if (!quote) return null;
-
-    const internalSecret = requireInternalSecret();
-    if (args.secret === internalSecret) {
-      return quote;
-    }
-
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new Error('No autenticado');
-
-    const user = await ctx.db
-      .query('users')
-      .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
-      .unique();
-
-    if (!user || user._id !== quote.userId) {
-      throw new Error('No autorizado');
-    }
-
-    return quote;
   },
 });
 
 /**
- * Registra que al Customer se le dijo algo. Independiente del Outcome: no lo lee
- * ni lo escribe.
+ * Registra que se le envió el Quote Document al Customer. Independiente del
+ * Outcome: no lo lee ni lo escribe.
+ *
+ * Es una mutación distinta de `markRejectionExplained` a propósito: son dos
+ * hechos distintos del recorrido, y compartir una sola mutación es lo que hacía
+ * que un camino registrara el hecho del otro.
  */
-export const markAsSentToClient = mutation({
+export const markQuoteDocumentSent = internalMutation({
   args: { quoteId: v.id('quotes') },
   handler: async (ctx, args) => {
-    const quote = await ctx.db.get(args.quoteId);
-    if (!quote) throw new Error('Cotización no encontrada');
-
-    await ctx.db.patch(args.quoteId, {
-      customerNotifiedAt: Date.now(),
-    });
+    await recordCustomerNotified(ctx, args.quoteId, 'quoteDocumentSentAt');
   },
 });
-export const getFullQuoteDetails = query({
-  args: { requestId: v.string(), secret: v.optional(v.string()) },
+
+/** Registra que al Customer se le explicó por qué no hay Quote Document. */
+export const markRejectionExplained = internalMutation({
+  args: { quoteId: v.id('quotes') },
+  handler: async (ctx, args) => {
+    await recordCustomerNotified(ctx, args.quoteId, 'rejectionExplainedAt');
+  },
+});
+
+/**
+ * Deja constancia del hecho concreto y, además, de que al Customer se le dijo
+ * algo. Cada hecho tiene su propio campo: registrar uno no puede borrar el otro.
+ */
+async function recordCustomerNotified(
+  ctx: MutationCtx,
+  quoteId: Doc<'quotes'>['_id'],
+  fact: 'quoteDocumentSentAt' | 'rejectionExplainedAt'
+) {
+  const quote = await ctx.db.get(quoteId);
+  if (!quote) throw new Error('Replacement Request no encontrada');
+
+  const now = Date.now();
+  await ctx.db.patch(quoteId, {
+    customerNotifiedAt: now,
+    [fact]: now,
+  });
+}
+
+/**
+ * Lectura interna completa — Replacement Request más el Customer dueño — para
+ * los caminos que redactan correo o Quote Document. Devuelve el Suggested Price
+ * junto al Confirmed, así que nunca puede ser pública: quien la consuma decide
+ * qué le muestra al Customer.
+ */
+export const getFullQuoteDetails = internalQuery({
+  args: { requestId: v.string() },
   handler: async (ctx, args) => {
     const quote = await ctx.db
       .query('quotes')
@@ -272,15 +277,6 @@ export const getFullQuoteDetails = query({
     const user = await ctx.db.get(quote.userId);
     if (!user) return null;
 
-    const internalSecret = requireInternalSecret();
-    if (args.secret !== internalSecret) {
-      const identity = await ctx.auth.getUserIdentity();
-      if (!identity || identity.subject !== user.clerkId) {
-        throw new Error('No autorizado');
-      }
-    }
-
-    // ... previous content ...
     return { quote, user };
   },
 });

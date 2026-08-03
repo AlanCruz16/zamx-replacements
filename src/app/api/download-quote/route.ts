@@ -1,13 +1,10 @@
 import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { renderToStream } from '@react-pdf/renderer';
-import { ConvexHttpClient } from 'convex/browser';
-import { api } from '../../../../convex/_generated/api';
 import { QuoteDocument } from '@/components/pdf/QuoteDocument';
 import { confirmedQuoteLines } from '@/lib/confirmed-prices';
+import { fetchQuoteDetails } from '@/lib/internal-api';
 import React from 'react';
-
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 export async function GET(req: Request) {
   try {
@@ -24,10 +21,7 @@ export async function GET(req: Request) {
     }
 
     // 1. Obtener la cotización y el usuario de Convex
-    const data = await convex.query(api.quotes.getFullQuoteDetails, {
-      requestId: quoteId,
-      secret: process.env.INTERNAL_API_SECRET!,
-    });
+    const data = await fetchQuoteDetails(quoteId);
 
     if (!data) {
       return new NextResponse('Cotización o usuario no encontrados', { status: 404 });
@@ -35,7 +29,9 @@ export async function GET(req: Request) {
 
     const { quote, user } = data;
 
-    // Verificar IDOR
+    // Camino del Customer: la identidad de Clerk tiene que ser dueña de la
+    // Replacement Request. La lectura de arriba es interna precisamente para que
+    // esta comprobación sea la única puerta.
     if (user.clerkId !== userId) {
       return new NextResponse('Unauthorized', { status: 401 });
     }

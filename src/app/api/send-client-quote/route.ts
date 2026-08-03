@@ -1,34 +1,36 @@
 import { NextResponse } from 'next/server';
 import { renderToBuffer } from '@react-pdf/renderer';
 import { Resend } from 'resend';
-import { ConvexHttpClient } from 'convex/browser';
-import { api } from '../../../../convex/_generated/api';
 import { QuoteDocument } from '@/components/pdf/QuoteDocument';
 import { ClientQuoteEmail } from '@/emails/ClientQuoteEmail';
 import { confirmedQuoteLines } from '@/lib/confirmed-prices';
+import {
+  authorizeInternalRequest,
+  fetchQuoteDetails,
+  markQuoteDocumentSent,
+} from '@/lib/internal-api';
 import { render } from 'react-email';
 import React from 'react';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
 
 export async function POST(req: Request) {
   try {
-    if (req.headers.get('x-internal-secret') !== process.env.INTERNAL_API_SECRET) {
-      return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 });
+    const denied = authorizeInternalRequest(req);
+    if (denied) {
+      return NextResponse.json({ success: false, error: denied.error }, { status: denied.status });
     }
 
-    const { quoteId } = await req.json();
+    // El código `REQ-XXXXXX` nombra la Replacement Request; `_id` es otra cosa,
+    // y llamar a ambos `quoteId` es lo que hacía confusas estas rutas.
+    const { requestId } = await req.json();
 
-    if (!quoteId) {
-      return NextResponse.json({ success: false, error: 'Falta quoteId' }, { status: 400 });
+    if (!requestId) {
+      return NextResponse.json({ success: false, error: 'Falta requestId' }, { status: 400 });
     }
 
     // 1. Obtener la cotización y el usuario de Convex
-    const data = await convex.query(api.quotes.getFullQuoteDetails, {
-      requestId: quoteId,
-      secret: process.env.INTERNAL_API_SECRET!,
-    });
+    const data = await fetchQuoteDetails(requestId);
     if (!data) {
       return NextResponse.json(
         { success: false, error: 'Cotización o usuario no encontrados' },
@@ -56,7 +58,7 @@ export async function POST(req: Request) {
     const validUntil = new Date(quote.expiresAt).toLocaleDateString('es-MX');
 
     const pdfProps = {
-      quoteId: quote.requestId || quoteId,
+      quoteId: quote.requestId || requestId,
       requestId: quote.requestId,
       date,
       validUntil,
@@ -101,8 +103,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error }, { status: 400 });
     }
 
-    // 6. Marcar como enviada en Convex
-    await convex.mutation(api.quotes.markAsSentToClient, { quoteId: quote._id });
+    // 6. Registrar en Convex que el Quote Document salió
+    await markQuoteDocumentSent(quote._id);
 
     return NextResponse.json({ success: true, resendData });
   } catch (error) {
