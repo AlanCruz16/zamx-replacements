@@ -245,6 +245,106 @@ describe('quotes.create', () => {
   });
 });
 
+/**
+ * Ticket 12 — un Model Prefix sin rango configurado no recibe precio inventado.
+ *
+ * `create` sorteaba entre 2500 y 3000 USD cuando ninguna regla coincidía y
+ * marcaba el producto con `isUnknownPrefix`, una bandera que ninguna superficie
+ * leía. El número resultante era indistinguible de un Suggested Price real: sumaba
+ * al subtotal, al IVA y al total, viajaba en el correo del Approver como una
+ * propuesta del sistema, y al aprobarse en bloque llegaba al Customer.
+ */
+const UNMATCHED_MODEL = 'XX999-SIN-REGLA';
+
+/** El rango que `create` sorteaba. Ningún número del registro puede caer aquí. */
+const INVENTED_RANGE = { min: 2500, max: 3000 };
+
+/** Todos los números de un valor serializable, a cualquier profundidad. */
+function numbersIn(value: unknown): number[] {
+  if (typeof value === 'number') return [value];
+  if (Array.isArray(value)) return value.flatMap(numbersIn);
+  if (value !== null && typeof value === 'object') return Object.values(value).flatMap(numbersIn);
+  return [];
+}
+
+describe('un Model Prefix sin rango configurado no produce Suggested Price', () => {
+  test('la Replacement Request se crea igualmente y sigue en revisión', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    // No cotizable no es rechazada: el Customer sigue atendido, y es el Approver
+    // quien pone el Confirmed Price a mano.
+    const creada = await createQuote(t, clerkId, [{ ...PRODUCT, model: UNMATCHED_MODEL }]);
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+
+    expect(stored).not.toBeNull();
+    expect(stored!.products[0].suggestedPriceUSD).toBeUndefined();
+    // Ausencia de Outcome es exactamente lo que significa "en revisión".
+    expect(stored!.outcome).toBeUndefined();
+    expect(stored!.customerNotifiedAt).toBeUndefined();
+  });
+
+  test('ningún número cae en el rango que se sorteaba cuando no había regla', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    // Se barren el registro y la respuesta enteros, no sólo `suggestedPriceUSD`:
+    // lo que este ticket cierra es que exista un precio fabricado en alguna
+    // parte, se llame como se llame el campo donde acabe. Sin regla que
+    // coincida, el único número que podría caer en 2500–3000 sería inventado.
+    const creada = await createQuote(t, clerkId, [{ ...PRODUCT, model: UNMATCHED_MODEL }]);
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+
+    for (const n of [...numbersIn(stored), ...numbersIn(creada)]) {
+      expect(n < INVENTED_RANGE.min || n > INVENTED_RANGE.max).toBe(true);
+    }
+  });
+
+  test('los totales sugeridos excluyen la pieza sin Suggested Price en vez de contarla como cero', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seedCustomer(t, 'user_ana', 'Ana');
+    await seedRule(t, { prefix: 'MK', minPriceUSD: 1000, maxPriceUSD: 1000 });
+
+    const creada = await createQuote(t, clerkId, [
+      { ...PRODUCT, partNumber: 'P-CON-PRECIO' },
+      { ...PRODUCT, partNumber: 'P-SIN-PRECIO', model: UNMATCHED_MODEL },
+    ]);
+
+    // 1000 × 2 = 2000, y nada más. Un cero por la pieza sin precio daría el mismo
+    // subtotal, así que lo que distingue este caso es que el total es *parcial*:
+    // la ausencia sigue estando en los productos para que la superficie que los
+    // presente pueda decirlo. Ver `src/emails/QuoteRequestTemplate.tsx`.
+    expect(creada.subtotalUSD).toBe(2000);
+    expect(creada.taxUSD).toBe(320);
+    expect(creada.totalUSD).toBe(2320);
+    expect(creada.products.map((p) => p.suggestedPriceUSD)).toEqual([1000, undefined]);
+  });
+
+  test('el Confirmed Price que da el Approver se escribe tal cual', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId, [{ ...PRODUCT, model: UNMATCHED_MODEL }]);
+
+    // 8400 no guarda relación con ningún rango configurado y aun así se escribe
+    // entero: sin Suggested Price no hay contra qué acotarlo, y mandar la pieza
+    // a una persona es exactamente lo que se hace en vez de acotar. La banda de
+    // 0.5×–2× que el ticket 10 añadirá vive en la función de veredicto, no aquí,
+    // y tampoco alcanzará a esta pieza — esto fija el extremo que seguirá siendo
+    // cierto después de aquel ticket.
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      classification: 'modified',
+      explanation: 'Cotizada a mano.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 8400 }],
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.products[0].confirmedPriceUSD).toBe(8400);
+    expect(stored!.products[0].suggestedPriceUSD).toBeUndefined();
+    expect(stored!.outcome).toBe('priced_differently');
+  });
+});
+
 /** Afirma que un producto lleva la Delivery Estimate sugerida configurada. */
 function expectConfiguredDeliveryRange(product: {
   suggestedDeliveryWeeksMin: number;
