@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { RejectedQuoteEmail } from '@/emails/RejectedQuoteEmail';
+import { isNotifiableOutcome } from '../../../../convex/lib/outcome';
 import {
   authorizeInternalRequest,
   fetchQuoteDetails,
   markRejectionExplained,
 } from '@/lib/internal-api';
+import { QUOTE_SENDER } from '@/lib/addresses';
 import { render } from 'react-email';
 import React from 'react';
 
@@ -26,6 +28,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Faltan datos' }, { status: 400 });
     }
 
+    // Sólo tres Outcomes se le comunican al Customer sin Quote Document. Con
+    // cualquier otro valor la plantilla caía en su rama por defecto y mandaba un
+    // correo con encabezado genérico y cuerpo vacío: el Customer se enteraba de
+    // que pasó algo, pero no de qué ni de qué hacer.
+    if (!isNotifiableOutcome(outcome)) {
+      return NextResponse.json(
+        { success: false, error: `Outcome no notificable al Customer: ${outcome}` },
+        { status: 400 }
+      );
+    }
+
     // 1. Obtener usuario asociado a la cotización
     const data = await fetchQuoteDetails(requestId);
     if (!data) {
@@ -36,13 +49,15 @@ export async function POST(req: Request) {
     }
 
     const { quote, user } = data;
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    // Sin URL público configurado no hay `http://localhost:3000` que valga: ese
+    // logo y ese enlace sólo resuelven en la máquina de quien los escribió.
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || undefined;
 
     // 2. Renderizar el HTML del Email
     const emailHtml = await render(
       React.createElement(RejectedQuoteEmail, {
         fullName: user.fullName,
-        quoteId: quote.requestId || requestId,
+        requestId: quote.requestId || requestId,
         outcome,
         explanation: explanation || quote.approverExplanation,
         baseUrl,
@@ -51,9 +66,11 @@ export async function POST(req: Request) {
 
     // 3. Enviar el correo usando Resend (sin PDF)
     const { data: resendData, error } = await resend.emails.send({
-      from: 'ZAMX Cotizaciones <cotizaciones@za.idcn.com.mx>', // Cambiar en prod a @ziehl-abegg.com.mx
+      from: QUOTE_SENDER,
       to: [user.email], // Se envía al correo registrado por el cliente
-      subject: `Actualización sobre su solicitud ZAMX-Q-${quote.requestId || requestId}`,
+      // Mismo identificador que el cuerpo y que el resto del recorrido: el
+      // `REQ-XXXXXX` a secas, sin un segundo esquema concatenado delante.
+      subject: `Actualización sobre su solicitud ${quote.requestId || requestId}`,
       html: emailHtml,
     });
 

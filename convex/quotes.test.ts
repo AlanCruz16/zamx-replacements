@@ -132,6 +132,24 @@ describe('quotes.create', () => {
     expect(result.products[0].suggestedPriceUSD).toBeUndefined();
   });
 
+  test('devuelve los datos de contacto del Customer, para que el Approver pueda llamarle', async () => {
+    const t = convexTest(schema, modules);
+    await seedRule(t);
+    const clerkId = await seedCustomer(t, 'user_ana', 'Ana');
+
+    const result = await createQuote(t, clerkId);
+
+    // Salen del registro y no de lo que manda el navegador: el correo al
+    // Approver es la superficie donde se decide sin abrir la aplicación, y con
+    // sólo el nombre una solicitud ambigua no se resuelve con una llamada.
+    // Ver `src/emails/QuoteRequestTemplate.tsx`.
+    expect(result.customer).toEqual({
+      fullName: 'Ana',
+      companyName: 'Empresa de Ana',
+      email: 'user_ana@example.com',
+    });
+  });
+
   test('una Replacement Request nace sin Outcome, que es lo que significa en revisión', async () => {
     const t = convexTest(schema, modules);
     const clerkId = await seed(t);
@@ -245,6 +263,106 @@ describe('quotes.create', () => {
   });
 });
 
+/**
+ * Ticket 12 — un Model Prefix sin rango configurado no recibe precio inventado.
+ *
+ * `create` sorteaba entre 2500 y 3000 USD cuando ninguna regla coincidía y
+ * marcaba el producto con `isUnknownPrefix`, una bandera que ninguna superficie
+ * leía. El número resultante era indistinguible de un Suggested Price real: sumaba
+ * al subtotal, al IVA y al total, viajaba en el correo del Approver como una
+ * propuesta del sistema, y al aprobarse en bloque llegaba al Customer.
+ */
+const UNMATCHED_MODEL = 'XX999-SIN-REGLA';
+
+/** El rango que `create` sorteaba. Ningún número del registro puede caer aquí. */
+const INVENTED_RANGE = { min: 2500, max: 3000 };
+
+/** Todos los números de un valor serializable, a cualquier profundidad. */
+function numbersIn(value: unknown): number[] {
+  if (typeof value === 'number') return [value];
+  if (Array.isArray(value)) return value.flatMap(numbersIn);
+  if (value !== null && typeof value === 'object') return Object.values(value).flatMap(numbersIn);
+  return [];
+}
+
+describe('un Model Prefix sin rango configurado no produce Suggested Price', () => {
+  test('la Replacement Request se crea igualmente y sigue en revisión', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    // No cotizable no es rechazada: el Customer sigue atendido, y es el Approver
+    // quien pone el Confirmed Price a mano.
+    const creada = await createQuote(t, clerkId, [{ ...PRODUCT, model: UNMATCHED_MODEL }]);
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+
+    expect(stored).not.toBeNull();
+    expect(stored!.products[0].suggestedPriceUSD).toBeUndefined();
+    // Ausencia de Outcome es exactamente lo que significa "en revisión".
+    expect(stored!.outcome).toBeUndefined();
+    expect(stored!.customerNotifiedAt).toBeUndefined();
+  });
+
+  test('ningún número cae en el rango que se sorteaba cuando no había regla', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+
+    // Se barren el registro y la respuesta enteros, no sólo `suggestedPriceUSD`:
+    // lo que este ticket cierra es que exista un precio fabricado en alguna
+    // parte, se llame como se llame el campo donde acabe. Sin regla que
+    // coincida, el único número que podría caer en 2500–3000 sería inventado.
+    const creada = await createQuote(t, clerkId, [{ ...PRODUCT, model: UNMATCHED_MODEL }]);
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+
+    for (const n of [...numbersIn(stored), ...numbersIn(creada)]) {
+      expect(n < INVENTED_RANGE.min || n > INVENTED_RANGE.max).toBe(true);
+    }
+  });
+
+  test('los totales sugeridos excluyen la pieza sin Suggested Price en vez de contarla como cero', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seedCustomer(t, 'user_ana', 'Ana');
+    await seedRule(t, { prefix: 'MK', minPriceUSD: 1000, maxPriceUSD: 1000 });
+
+    const creada = await createQuote(t, clerkId, [
+      { ...PRODUCT, partNumber: 'P-CON-PRECIO' },
+      { ...PRODUCT, partNumber: 'P-SIN-PRECIO', model: UNMATCHED_MODEL },
+    ]);
+
+    // 1000 × 2 = 2000, y nada más. Un cero por la pieza sin precio daría el mismo
+    // subtotal, así que lo que distingue este caso es que el total es *parcial*:
+    // la ausencia sigue estando en los productos para que la superficie que los
+    // presente pueda decirlo. Ver `src/emails/QuoteRequestTemplate.tsx`.
+    expect(creada.subtotalUSD).toBe(2000);
+    expect(creada.taxUSD).toBe(320);
+    expect(creada.totalUSD).toBe(2320);
+    expect(creada.products.map((p) => p.suggestedPriceUSD)).toEqual([1000, undefined]);
+  });
+
+  test('el Confirmed Price que da el Approver se escribe tal cual', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId, [{ ...PRODUCT, model: UNMATCHED_MODEL }]);
+
+    // 8400 no guarda relación con ningún rango configurado y aun así se escribe
+    // entero: sin Suggested Price no hay contra qué acotarlo, y mandar la pieza
+    // a una persona es exactamente lo que se hace en vez de acotar. La banda de
+    // 0.5×–2× que el ticket 10 añadirá vive en la función de veredicto, no aquí,
+    // y tampoco alcanzará a esta pieza — esto fija el extremo que seguirá siendo
+    // cierto después de aquel ticket.
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_differently',
+      explanation: 'Cotizada a mano.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 8400 }],
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.products[0].confirmedPriceUSD).toBe(8400);
+    expect(stored!.products[0].suggestedPriceUSD).toBeUndefined();
+    expect(stored!.outcome).toBe('priced_differently');
+  });
+});
+
 /** Afirma que un producto lleva la Delivery Estimate sugerida configurada. */
 function expectConfiguredDeliveryRange(product: {
   suggestedDeliveryWeeksMin: number;
@@ -335,7 +453,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'modified',
+      outcome: 'priced_differently',
       explanation: 'Ajusto el precio de esta pieza.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 5555 }],
     });
@@ -357,7 +475,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'approved',
+      outcome: 'priced_as_suggested',
       explanation: 'Precios correctos, adelante.',
     });
 
@@ -375,7 +493,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'approved',
+      outcome: 'priced_as_suggested',
       explanation: 'Todo correcto.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 9999 }],
       newDeliveryWeeks: 4,
@@ -398,7 +516,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'approved',
+      outcome: 'priced_as_suggested',
       explanation: 'Adelante.',
     });
 
@@ -415,7 +533,7 @@ describe('el Outcome y la notificación al Customer se mueven por separado', () 
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'obsolete',
+      outcome: 'discontinued',
       explanation: 'Pieza descontinuada, sin reemplazo directo.',
     });
 
@@ -441,18 +559,127 @@ describe('el Outcome y la notificación al Customer se mueven por separado', () 
     const clerkId = await seed(t);
     const creada = await createQuote(t, clerkId);
 
-    // Una clasificación que el intérprete no reconoce no debe producir Outcome:
-    // la Replacement Request sigue en revisión, que es lo que significa su
-    // ausencia.
+    // Una respuesta que no se pudo interpretar no produce Outcome: la
+    // Replacement Request sigue en revisión, que es lo que significa su
+    // ausencia. Las palabras del Approver sí se guardan.
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'no-se-entiende',
       explanation: 'Respuesta ambigua.',
     });
 
     const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
     expect(stored!.outcome).toBeUndefined();
     expect(stored!.products[0].confirmedPriceUSD).toBeUndefined();
+  });
+});
+
+/**
+ * Ticket 11 — llegar a un Outcome es una sola transición.
+ *
+ * No se prueba la carrera corriéndola: se prueba que la mutación **rechaza la
+ * segunda escritura**, que es la conducta que la cierra. La comprobación de si
+ * ya hay Outcome y la escritura ocurren dentro de la misma mutación, y una
+ * mutación de Convex es una transacción, así que dos sondeos solapados no pueden
+ * pasar los dos por la comprobación.
+ */
+describe('llegar a un Outcome es una transición atómica', () => {
+  test('fijar el Outcome de una Request que no tiene ninguno se aplica, y lo reporta', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    const resultado = await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_as_suggested',
+      explanation: 'Precios correctos.',
+    });
+
+    expect(resultado).toMatchObject({ kind: 'settled', outcome: 'priced_as_suggested' });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.outcome).toBe('priced_as_suggested');
+  });
+
+  test('un segundo intento sobre una Request ya decidida no la cambia, y lo reporta', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'discontinued',
+      explanation: 'Pieza descontinuada.',
+    });
+
+    // Gana la primera respuesta. Un correo extraviado del mismo hilo no revisa
+    // una decisión que al Customer puede que ya se le haya comunicado.
+    const segundo = await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_as_suggested',
+      explanation: 'Perdón, sí la tenemos.',
+    });
+
+    expect(segundo).toMatchObject({ kind: 'already_settled', outcome: 'discontinued' });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.outcome).toBe('discontinued');
+  });
+
+  test('el segundo intento deja intactos los Confirmed Prices y la explicación del primero', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+    const suggested = creada.products[0].suggestedPriceUSD!;
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_differently',
+      explanation: 'Va en 5555.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 5555 }],
+      newDeliveryWeeks: 12,
+    });
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_differently',
+      explanation: 'Mejor en 9999.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 9999 }],
+      newDeliveryWeeks: 40,
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.products[0].confirmedPriceUSD).toBe(5555);
+    expect(stored!.products[0].confirmedDeliveryWeeksMin).toBe(12);
+    expect(stored!.products[0].suggestedPriceUSD).toBe(suggested);
+    expect(stored!.approverExplanation).toBe('Va en 5555.');
+  });
+
+  test('una respuesta que no produce Outcome reporta que la Request sigue en revisión', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    const resultado = await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      explanation: 'Respuesta ambigua.',
+    });
+
+    // Distinto de `already_settled`: aquí no hay decisión que respetar, y la
+    // siguiente respuesta del Approver sí podrá fijar el Outcome.
+    expect(resultado).toMatchObject({ kind: 'undecided' });
+  });
+
+  test('una Request inexistente falla en vez de reportar una transición', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t);
+
+    await expect(
+      t.mutation(internal.quotes.processEmployeeResponse, {
+        requestId: 'REQ-NOEXISTE',
+        outcome: 'discontinued',
+        explanation: 'Da igual.',
+      })
+    ).rejects.toThrow('REQ-NOEXISTE');
   });
 });
 
@@ -516,7 +743,7 @@ describe('quotes.getUserQuotes', () => {
     // Una pieza genuinamente sin coste. Con un guardia `> 0` desaparecería.
     await t.mutation(internal.quotes.processEmployeeResponse, {
       requestId: creada.requestId,
-      classification: 'modified',
+      outcome: 'priced_differently',
       explanation: 'Va sin costo.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 0 }],
     });

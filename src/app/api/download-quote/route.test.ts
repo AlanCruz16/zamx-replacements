@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { INTERNAL_PATHS, stubInternalConvex } from '@/test/internal-convex';
+import type { Outcome } from '../../../../convex/lib/outcome';
+import type { Doc } from '../../../../convex/_generated/dataModel';
 
 /**
  * Seam 2 — la descarga del Quote Document es una superficie del Customer, así
@@ -24,7 +26,18 @@ function request(quoteId = 'REQ-V59X9B') {
   return new Request(`http://localhost:3000/api/download-quote?quoteId=${quoteId}`);
 }
 
-function quoteDetails() {
+/**
+ * Los tipos salen del esquema a propósito: un fixture con forma libre sobrevive
+ * a un renombrado de campo y deja de probar lo que dice probar.
+ */
+type QuoteOverrides = {
+  outcome?: Outcome;
+  customerNotifiedAt?: number;
+  products?: Doc<'quotes'>['products'];
+};
+
+function quoteDetails(overrides: QuoteOverrides = {}) {
+  const { outcome = 'priced_differently', ...rest } = overrides;
   return {
     quote: {
       _id: 'quote_1',
@@ -43,7 +56,8 @@ function quoteDetails() {
           suggestedDeliveryWeeksMax: 30,
         },
       ],
-      outcome: 'priced_differently',
+      outcome,
+      ...rest,
     },
     user: {
       clerkId: 'user_ana',
@@ -97,5 +111,78 @@ describe('GET /api/download-quote', () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get('Content-Type')).toBe('application/pdf');
+  });
+
+  /**
+   * El test de más valor de la suite. Una pieza descontinuada o exclusiva del
+   * fabricante no se puede vender, así que no tiene Quote Document — por mucho
+   * que lleve precios encima y por mucho que ya se le haya avisado al Customer.
+   * La comprobación va aquí, en el servidor, porque la ruta se alcanza directa
+   * aunque el enlace esté escondido.
+   */
+  test.each(['oem_restricted', 'discontinued', 'blocked_pending_info'] as const)(
+    'una Replacement Request con Outcome %s no produce PDF ni aunque tenga precios',
+    async (outcome) => {
+      getAuth.mockResolvedValue({ userId: 'user_ana' });
+      convex.reply(
+        INTERNAL_PATHS.details,
+        quoteDetails({ outcome, customerNotifiedAt: Date.UTC(2026, 6, 31) })
+      );
+      const GET = await loadHandler();
+
+      const res = await GET(request());
+
+      expect(res.status).toBe(409);
+      expect(res.headers.get('Content-Type')).not.toBe('application/pdf');
+    }
+  );
+
+  test('una Replacement Request todavía en revisión no produce PDF', async () => {
+    getAuth.mockResolvedValue({ userId: 'user_ana' });
+    const { quote, user } = quoteDetails();
+    // En revisión es la *ausencia* de Outcome, no un valor: se quita el campo.
+    delete (quote as { outcome?: string }).outcome;
+    convex.reply(INTERNAL_PATHS.details, { quote, user });
+    const GET = await loadHandler();
+
+    const res = await GET(request());
+
+    expect(res.status).toBe(409);
+    expect(res.headers.get('Content-Type')).not.toBe('application/pdf');
+  });
+
+  test('una pieza sin Confirmed Price impide el Quote Document entero', async () => {
+    getAuth.mockResolvedValue({ userId: 'user_ana' });
+    convex.reply(
+      INTERNAL_PATHS.details,
+      quoteDetails({
+        products: [
+          {
+            partNumber: 'P-001',
+            model: 'MK137-4DZ.07.U',
+            quantity: 2,
+            deliveryLocation: 'Monterrey',
+            suggestedPriceUSD: 3000,
+            confirmedPriceUSD: 3125,
+            suggestedDeliveryWeeksMin: 25,
+            suggestedDeliveryWeeksMax: 30,
+          },
+          {
+            partNumber: 'P-002',
+            model: 'ZZ999-SIN-PREFIJO',
+            quantity: 1,
+            deliveryLocation: 'Monterrey',
+            suggestedDeliveryWeeksMin: 25,
+            suggestedDeliveryWeeksMax: 30,
+          },
+        ],
+      })
+    );
+    const GET = await loadHandler();
+
+    const res = await GET(request());
+
+    expect(res.status).toBe(409);
+    expect(res.headers.get('Content-Type')).not.toBe('application/pdf');
   });
 });

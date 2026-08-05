@@ -3,7 +3,8 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { Resend } from 'resend';
 import { QuoteDocument } from '@/components/pdf/QuoteDocument';
 import { ClientQuoteEmail } from '@/emails/ClientQuoteEmail';
-import { confirmedQuoteLines } from '@/lib/confirmed-prices';
+import { quoteDocumentProps } from '@/lib/quote-document-props';
+import { QUOTE_SENDER } from '@/lib/addresses';
 import {
   authorizeInternalRequest,
   fetchQuoteDetails,
@@ -40,41 +41,16 @@ export async function POST(req: Request) {
 
     const { quote, user } = data;
 
-    // 2. Preparar los datos para el PDF. Sin Confirmed Price en todas las piezas
-    // no hay Quote Document: un precio ausente no es cero.
-    const lines = confirmedQuoteLines(quote.products);
-    if (!lines) {
+    // 2. Preparar los datos para el PDF. Misma regla que la descarga, mismo
+    // módulo: sin Outcome con precio y sin Confirmed Price en todas las piezas
+    // no hay Quote Document que adjuntar.
+    const pdfProps = quoteDocumentProps(data);
+    if (!pdfProps) {
       return NextResponse.json(
-        {
-          success: false,
-          error: 'La solicitud no tiene un precio confirmado para todas sus piezas',
-        },
+        { success: false, error: 'Esta Replacement Request no tiene Quote Document' },
         { status: 409 }
       );
     }
-
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const date = new Date(quote._creationTime).toLocaleDateString('es-MX');
-    const validUntil = new Date(quote.expiresAt).toLocaleDateString('es-MX');
-
-    const pdfProps = {
-      quoteId: quote.requestId || requestId,
-      requestId: quote.requestId,
-      date,
-      validUntil,
-      clientInfo: {
-        companyName: user.companyName,
-        fullName: user.fullName,
-        deliveryLocation: quote.products[0]?.deliveryLocation || '',
-      },
-      products: lines.products,
-      subtotal: lines.totals.subtotalUSD,
-      iva: lines.totals.taxUSD,
-      total: lines.totals.totalUSD,
-      employeeName: 'Ventas ZAMX',
-      employeeEmail: 'cotizaciones@ziehl-abegg.com.mx',
-      baseUrl,
-    };
 
     // 3. Renderizar el PDF a Buffer
     // @ts-expect-error Incompatibilidad de tipos entre react-pdf y React 19
@@ -82,18 +58,24 @@ export async function POST(req: Request) {
 
     // 4. Renderizar el HTML del Email
     const emailHtml = await render(
-      React.createElement(ClientQuoteEmail, { fullName: user.fullName, quoteId: pdfProps.quoteId })
+      React.createElement(ClientQuoteEmail, {
+        fullName: user.fullName,
+        requestId: pdfProps.requestId,
+      })
     );
 
     // 5. Enviar el correo usando Resend con el PDF adjunto
     const { data: resendData, error } = await resend.emails.send({
-      from: 'ZAMX Cotizaciones <cotizaciones@za.idcn.com.mx>', // Cambiar en prod a @ziehl-abegg.com.mx
+      from: QUOTE_SENDER,
       to: [user.email], // Se envía al correo registrado por el cliente
-      subject: `Su cotización ZAMX-Q-${pdfProps.quoteId} de ZIEHL-ABEGG México`,
+      // El código `REQ-XXXXXX` es el identificador, y es el mismo que el
+      // Customer verá en el asunto, en el cuerpo y en el Quote Document
+      // adjunto. Prefijarlo con un `ZAMX-Q-` inventaba un segundo esquema.
+      subject: `Su cotización ${pdfProps.requestId} de ZIEHL-ABEGG México`,
       html: emailHtml,
       attachments: [
         {
-          filename: `Cotizacion_${pdfProps.quoteId}.pdf`,
+          filename: `Cotizacion_${pdfProps.requestId}.pdf`,
           content: pdfBuffer,
         },
       ],

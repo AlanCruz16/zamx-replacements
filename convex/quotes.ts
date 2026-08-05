@@ -2,6 +2,7 @@ import { query, internalMutation, internalQuery } from './_generated/server';
 import { v } from 'convex/values';
 import { computeTotals } from './lib/totals';
 import { isPricedOutcome, type Outcome } from './lib/outcome';
+import { outcomeValidator } from './schema';
 import { drawSuggestedPrice, matchPricingRule } from './lib/pricing';
 import { SUGGESTED_DELIVERY_WEEKS } from './lib/delivery';
 import { allocateRequestId } from './lib/request_id';
@@ -74,6 +75,15 @@ export const create = internalMutation({
       quoteId,
       requestId,
       products: processedProducts,
+      // Con quién hablar si la solicitud resulta ambigua. Sale de este registro
+      // y no de lo que el chat manda desde el navegador: ese nombre lo escribe
+      // quien hace la petición, y era lo único que veía el Approver.
+      customer: {
+        fullName: user.fullName,
+        companyName: user.companyName,
+        email: user.email,
+        ...(user.phone === undefined ? {} : { phone: user.phone }),
+      },
       // Derivados, no almacenados. Son los totales sugeridos, sólo para el
       // Approver: los productos sin Suggested Price no suman nada.
       ...suggestedTotals(processedProducts),
@@ -109,31 +119,47 @@ function suggestedTotals(products: readonly Product[]) {
 }
 
 /**
- * Traduce la clasificación que devuelve el intérprete al Outcome del glosario.
- * Una clasificación desconocida no produce Outcome: la Replacement Request se
- * queda en revisión, que es exactamente lo que significa su ausencia.
+ * Qué pasó con la transición, para que quien llama no tenga que releer el
+ * registro para averiguarlo — releerlo sería volver a partir en dos lo que esta
+ * mutación existe para juntar.
+ *
+ * `settled` — esta llamada fijó el Outcome.
+ * `already_settled` — ya había uno; no se escribió nada. Se devuelve el que
+ * había, que es lo que hay que contestarle al Approver (ticket 10, caso 3).
+ * `undecided` — no se propuso Outcome: la Request sigue en revisión.
+ *
+ * El discriminante se llama `kind`, como el de `lib/reply_verdict.ts`, y no
+ * `status`: el glosario evita esa palabra justamente porque era el campo que
+ * mezclaba el Outcome con la notificación al Customer.
  */
-function outcomeFor(classification: string): Outcome | undefined {
-  switch (classification) {
-    case 'approved':
-      return 'priced_as_suggested';
-    case 'modified':
-      return 'priced_differently';
-    case 'oem_exclusive':
-      return 'oem_restricted';
-    case 'obsolete':
-      return 'discontinued';
-    case 'needs_info':
-      return 'blocked_pending_info';
-    default:
-      return undefined;
-  }
-}
+type OutcomeTransition =
+  | { kind: 'settled'; outcome: Outcome }
+  | { kind: 'already_settled'; outcome: Outcome }
+  | { kind: 'undecided' };
 
+/**
+ * Fija el Outcome de una Replacement Request **sólo si no tiene ninguno**, y
+ * reporta cuál de las dos cosas ocurrió.
+ *
+ * La comprobación y la escritura viven en la misma mutación a propósito: una
+ * mutación de Convex es una transacción, y separarlas dejaba una carrera con una
+ * llamada al modelo de lenguaje en medio. El cron sondea el buzón cada cinco
+ * minutos y puede solaparse consigo mismo, así que dos sondeos llegaban a ver el
+ * mismo mensaje sin procesar y los dos escribían: el segundo revisaba en
+ * silencio una decisión que al Customer quizá ya se le había comunicado.
+ *
+ * Gana la primera respuesta.
+ */
 export const processEmployeeResponse = internalMutation({
   args: {
     requestId: v.string(),
-    classification: v.string(),
+    /**
+     * El Outcome que produjo el veredicto, ya en el vocabulario del glosario.
+     * Ausente => no se llegó a una decisión y la Request sigue en revisión. El
+     * validador es el mismo del esquema, así que un valor que no sea un Outcome
+     * no llega hasta aquí en vez de traducirse a la callada.
+     */
+    outcome: v.optional(outcomeValidator),
     explanation: v.string(),
     newPricesUSD: v.optional(
       v.array(
@@ -145,7 +171,7 @@ export const processEmployeeResponse = internalMutation({
     ),
     newDeliveryWeeks: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<OutcomeTransition> => {
     // 1. Find the quote by requestId using index
     const quote = await ctx.db
       .query('quotes')
@@ -156,9 +182,16 @@ export const processEmployeeResponse = internalMutation({
       throw new Error(`Cotización no encontrada para el request: ${args.requestId}`);
     }
 
-    const outcome = outcomeFor(args.classification);
+    // 2. La decisión ya tomada es intocable, y con ella los Confirmed Prices y
+    // las palabras del Approver que la acompañaban: sobrescribir la explicación
+    // dejaría el registro contando una decisión con las razones de otra.
+    if (quote.outcome !== undefined) {
+      return { kind: 'already_settled', outcome: quote.outcome };
+    }
 
-    // 2. Confirmar precios y entregas. El Suggested Price nunca se toca: la
+    const outcome = args.outcome;
+
+    // 3. Confirmar precios y entregas. El Suggested Price nunca se toca: la
     // distancia entre lo propuesto y lo confirmado es la única evidencia de si
     // los rangos configurados sirven de algo.
     let products = quote.products;
@@ -191,7 +224,7 @@ export const processEmployeeResponse = internalMutation({
       });
     }
 
-    // 3. Escribir. `outcome` sólo se toca si la clasificación produjo uno, y
+    // 4. Escribir. `outcome` sólo se toca si la clasificación produjo uno, y
     // `customerNotifiedAt` no se toca nunca aquí: son dos hechos independientes.
     await ctx.db.patch(quote._id, {
       products,
@@ -199,7 +232,7 @@ export const processEmployeeResponse = internalMutation({
       approverExplanation: args.explanation,
     });
 
-    return { success: true, quoteId: quote._id, outcome };
+    return outcome === undefined ? { kind: 'undecided' } : { kind: 'settled', outcome };
   },
 });
 

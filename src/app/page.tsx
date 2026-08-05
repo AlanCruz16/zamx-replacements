@@ -5,9 +5,10 @@ import { api } from '../../convex/_generated/api';
 import Navbar from '@/components/layout/Navbar';
 import { GooeyText } from '@/components/ui/gooey-text-morphing';
 import { DottedSurface } from '@/components/ui/dotted-surface';
-import { BotMessageSquare, Wrench, Clock, Send, User, Loader2 } from 'lucide-react';
+import { BotMessageSquare, Wrench, Clock, Send, User } from 'lucide-react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
+import { SubmitQuoteRequestPart } from '@/components/chat/SubmitQuoteRequestPart';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
@@ -214,16 +215,11 @@ export default function Dashboard() {
                     }
 
                     if (part.type?.startsWith('tool-') || part.type === 'dynamic-tool') {
-                      // Extracted toolName from part.type (e.g. "tool-show_dataplate_guide" -> "show_dataplate_guide")
-                      const toolName =
-                        part.toolName ||
-                        part.toolInvocation?.toolName ||
-                        part.type?.replace('tool-', '');
-                      const toolInput =
-                        part.args ||
-                        part.input ||
-                        part.toolInvocation?.args ||
-                        part.toolInvocation?.input;
+                      // En v6 el nombre está en `part.toolName` (dynamic-tool) o
+                      // en el propio tipo, `tool-${toolName}`. El
+                      // `part.toolInvocation` de v4/v5 ya no existe, y buscarlo
+                      // sólo dejaba una part sin `state` viva de más.
+                      const toolName: string = part.toolName || part.type?.replace('tool-', '');
 
                       if (toolName === 'show_dataplate_guide') {
                         return (
@@ -270,25 +266,18 @@ export default function Dashboard() {
 
                       if (toolName === 'submit_quote_request') {
                         return (
-                          <div key={index} className="flex flex-col gap-3 mt-3">
-                            <div className="flex items-center gap-2 text-[var(--color-brand-light)] font-semibold pb-2">
-                              <Loader2 className="animate-spin" size={16} />
-                              {isEs ? 'Procesando Cotización...' : 'Processing Quote...'}
-                            </div>
-                          </div>
+                          <SubmitQuoteRequestPart
+                            key={index}
+                            state={part.state}
+                            output={part.output}
+                            isEs={isEs}
+                          />
                         );
                       }
 
-                      // Debug fallback for unrecognized tools
-                      return (
-                        <div
-                          key={index}
-                          className="text-xs text-red-500 mt-2 p-2 border border-red-200 rounded"
-                        >
-                          <p>DEBUG Unrecognized Tool: {toolName}</p>
-                          <pre>{JSON.stringify(part, null, 2)}</pre>
-                        </div>
-                      );
+                      // Una herramienta que no reconocemos no es asunto del
+                      // Customer: no se pinta nada.
+                      return null;
                     }
                     return null;
                   })}
