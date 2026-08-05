@@ -6,12 +6,44 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { interpretApproverReply } from '../src/lib/gemini-parser';
 import { isPricedOutcome } from './lib/outcome';
-import { screenInboundMessage, verdictForReply, type InboundMessage } from './lib/reply_verdict';
+import {
+  confirmedPrices,
+  screenInboundMessage,
+  unappliedPrices,
+  verdictForReply,
+  type InboundMessage,
+} from './lib/reply_verdict';
 import { approverAddresses } from './lib/approvers';
+import type { ApproverReplyPayload } from '../src/lib/approver-reply';
 import { requireInternalSecret } from '../src/lib/internal-secret';
 
 /** Un mensaje del buzón que ya pasó la criba, con lo que hace falta para juzgarlo. */
-type InboundReply = InboundMessage & { uid: number; requestId: string };
+type InboundReply = InboundMessage & { uid: number; requestId: string; sender: string };
+
+/**
+ * A dónde apuntan los webhooks hacia Next, o `undefined` si no se pueden usar.
+ *
+ * Convex corre en la nube y no resuelve `localhost`, así que en desarrollo no
+ * hay a dónde llamar: se dice en voz alta en vez de fallar cada envío por su
+ * cuenta.
+ */
+function webhookBaseUrl(requestId: string): string | undefined {
+  const baseUrl = process.env.APP_URL;
+
+  if (!baseUrl) {
+    console.warn('APP_URL no está configurada, no se activarán los webhooks.');
+    return undefined;
+  }
+
+  if (baseUrl.includes('localhost')) {
+    console.log(
+      `Omitiendo los webhooks de ${requestId} porque estamos en localhost (Convex nube no puede resolverlo).`
+    );
+    return undefined;
+  }
+
+  return baseUrl;
+}
 
 /**
  * De quién viene el mensaje, para la lista de Approvers.
@@ -96,7 +128,12 @@ export const checkInbox = internalAction({
             continue;
           }
 
-          messagesToProcess.push({ ...inbound, uid: message.uid, requestId: screening.requestId });
+          messagesToProcess.push({
+            ...inbound,
+            uid: message.uid,
+            requestId: screening.requestId,
+            sender: screening.sender,
+          });
         }
       } finally {
         lock.release();
@@ -160,68 +197,74 @@ export const checkInbox = internalAction({
             requestId: msg.requestId,
             outcome: verdict.outcome,
             explanation: verdict.explanation,
-            // Se mandan todos los precios extraídos, como hasta ahora. El
-            // ticket 10 es el que deja de aplicar los que el veredicto marcó
-            // fuera de banda y le contesta al Approver.
-            newPricesUSD: verdict.prices.map((p) => ({
-              partNumber: p.partNumber,
-              price: p.priceUSD,
-            })),
+            // Sólo los precios que el veredicto aplicó. Uno fuera de banda no
+            // se escribe y tampoco se descarta en silencio: se le contesta al
+            // Approver más abajo.
+            newPricesUSD: confirmedPrices(verdict),
             newDeliveryWeeks: verdict.deliveryWeeks,
           });
 
           successfulUids.push(msg.uid);
 
+          const baseUrl = webhookBaseUrl(msg.requestId);
+          const post = (path: string, body: unknown, label: string) =>
+            baseUrl === undefined
+              ? Promise.resolve()
+              : fetch(`${baseUrl}${path}`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'x-internal-secret': internalSecret,
+                  },
+                  body: JSON.stringify(body),
+                }).catch((e) => console.error(`Error trigger ${label}:`, e));
+
+          const replyToApprover = (payload: ApproverReplyPayload) =>
+            post('/api/send-approver-reply', { ...payload, to: msg.sender }, 'Approver Reply');
+
           // Gana la primera respuesta. Un correo posterior del mismo hilo no
           // revisa una decisión ya tomada, así que aquí no queda nada que
-          // notificarle al Customer: lo que falta es decírselo al Approver, que
-          // es el caso 3 del ticket 10. Se marca leído — dejarlo sin leer haría
-          // que cada sondeo gastara otra llamada al modelo en lo mismo.
+          // notificarle al Customer — lo que falta es decírselo al Approver,
+          // porque desde su lado una respuesta ignorada y una aplicada se ven
+          // igual. Se marca leído: dejarlo sin leer haría que cada sondeo
+          // gastara otra llamada al modelo en lo mismo.
           if (transition.kind === 'already_settled') {
             console.log(
               `Respuesta a ${msg.requestId} no aplicada: ya tenía Outcome (${transition.outcome}).`
             );
+            await replyToApprover({
+              requestId: msg.requestId,
+              reason: 'already_settled',
+              outcome: transition.outcome,
+            });
             continue;
+          }
+
+          // Confianza baja, un precio fuera de banda o un precio para una pieza
+          // ajena a la Request. En los tres casos el veredicto se quedó sin
+          // Outcome, así que la Request sigue en revisión y lo que falta es
+          // decirle al Approver qué no se pudo aplicar.
+          if (verdict.replyToApprover !== undefined) {
+            await replyToApprover({
+              requestId: msg.requestId,
+              reason: verdict.replyToApprover,
+              prices: unappliedPrices(verdict),
+            });
           }
 
           const outcome = transition.kind === 'settled' ? transition.outcome : undefined;
 
-          const baseUrl = process.env.APP_URL;
-          if (baseUrl) {
-            if (baseUrl.includes('localhost')) {
-              console.log(
-                `Omitiendo envío de PDF para ${msg.requestId} porque estamos en localhost (Convex nube no puede resolverlo).`
-              );
-            } else {
-              // El Outcome decide a quién se le avisa. Sin Outcome (confianza
-              // baja o clasificación desconocida) no se avisa a nadie: la
-              // Replacement Request sigue en revisión.
-              if (isPricedOutcome(outcome)) {
-                await fetch(`${baseUrl}/api/send-client-quote`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'x-internal-secret': internalSecret,
-                  },
-                  body: JSON.stringify({ requestId: msg.requestId }),
-                }).catch((e) => console.error('Error trigger PDF:', e));
-              } else if (outcome !== undefined) {
-                await fetch(`${baseUrl}/api/send-rejection-email`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'x-internal-secret': internalSecret,
-                  },
-                  body: JSON.stringify({
-                    requestId: msg.requestId,
-                    outcome,
-                    explanation: verdict.explanation,
-                  }),
-                }).catch((e) => console.error('Error trigger Rejection Email:', e));
-              }
-            }
-          } else {
-            console.warn('APP_URL no está configurada, no se activarán los webhooks de PDF.');
+          // El Outcome decide a quién se le avisa. Sin Outcome (confianza baja o
+          // clasificación desconocida) al Customer no se le dice nada: la
+          // Replacement Request sigue en revisión.
+          if (isPricedOutcome(outcome)) {
+            await post('/api/send-client-quote', { requestId: msg.requestId }, 'PDF');
+          } else if (outcome !== undefined) {
+            await post(
+              '/api/send-rejection-email',
+              { requestId: msg.requestId, outcome, explanation: verdict.explanation },
+              'Rejection Email'
+            );
           }
         } else {
           console.log(`Cotización ${msg.requestId} no encontrada.`);

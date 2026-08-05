@@ -108,15 +108,27 @@ export function screenInboundMessage(
   }
 
   const sender = normaliseAddress(message.envelopeSender);
-  const approvers = approverAddresses.map(normaliseAddress).filter((a) => a.length > 0);
 
-  // Una lista vacía no autoriza a nadie: sin Approvers configurados el buzón
-  // deja de mover Replacement Requests en vez de quedar abierto a cualquiera.
-  if (!approvers.includes(sender)) {
+  if (!isApproverAddress(sender, approverAddresses)) {
     return { kind: 'refused', reason: 'sender_not_approver', sender, requestId };
   }
 
   return { kind: 'accepted', sender, requestId };
+}
+
+/**
+ * Si una dirección es la de un Approver configurado. La misma regla que decide
+ * quién puede mover una Replacement Request decide a quién puede escribirle el
+ * sistema: la ruta que contesta (ticket 10) manda a una dirección que le llega
+ * en el cuerpo, y sin esta comprobación sería un remitente de correo abierto.
+ *
+ * Una lista vacía no autoriza a nadie: sin Approvers configurados el buzón deja
+ * de mover Replacement Requests en vez de quedar abierto a cualquiera.
+ */
+export function isApproverAddress(address: string, approverAddresses: readonly string[]): boolean {
+  const approvers = approverAddresses.map(normaliseAddress).filter((a) => a.length > 0);
+
+  return approvers.includes(normaliseAddress(address));
 }
 
 /**
@@ -162,29 +174,38 @@ export function verdictForReply(input: {
     };
   }
 
-  const outcome = interpretation.classification;
+  const classification = interpretation.classification;
 
   // Sólo `priced_differently` trae precios. Un precio suelto en una aprobación
   // en bloque se ignora — decir "cotizada como se sugirió" y guardar otra cifra
   // sería afirmar algo falso sobre lo que decidió el Approver.
   const prices =
-    outcome === 'priced_differently'
+    classification === 'priced_differently'
       ? (interpretation.newPricesUSD ?? []).map((extracted) => decidePrice(extracted, request))
       : [];
 
   // Un precio que no se pudo aplicar no se descarta en silencio: por qué no se
-  // aplicó es lo que hay que contestarle al Approver (ticket 10). Una pieza que
-  // no está en la Replacement Request suele ser un número de parte mal leído, y
-  // callarse deja el Outcome escrito sin la corrección que lo acompañaba.
+  // aplicó es lo que hay que contestarle al Approver. Una pieza que no está en
+  // la Replacement Request suele ser un número de parte mal leído.
   const replyToApprover = prices.some((p) => p.status === 'out_of_bounds')
     ? ('price_out_of_bounds' as const)
     : prices.some((p) => p.status === 'unknown_part')
       ? ('price_for_unknown_part' as const)
       : undefined;
 
+  // Con un precio sin aplicar no hay Outcome: la Replacement Request se queda en
+  // revisión hasta que el Approver confirme la cifra.
+  //
+  // Fijarlo igualmente era peor que perder el precio. Un Outcome cotizado
+  // dispara el Quote Document, y la pieza cuyo precio se descartó volvía a caer
+  // en su Suggested Price — el Customer recibía un compromiso con la cifra que
+  // nunca debe ver, y la confirmación del Approver llegaba a una decisión ya
+  // tomada, que no se revisa. Se conserva la explicación, que son sus palabras.
+  const outcome = replyToApprover === undefined ? classification : undefined;
+
   return {
     screening,
-    outcome,
+    ...(outcome === undefined ? {} : { outcome }),
     confidence,
     explanation: interpretation.explanation,
     prices,
@@ -193,6 +214,43 @@ export function verdictForReply(input: {
       : {}),
     ...(replyToApprover === undefined ? {} : { replyToApprover }),
   };
+}
+
+/**
+ * Los precios que sí se escriben como Confirmed Price. Lo que el veredicto
+ * marcó fuera de banda o para una pieza ajena a la Request no llega al registro.
+ *
+ * Vive aquí y no en el poller a propósito: el filtro es la regla del ticket 10,
+ * y dejarlo en la cáscara de correo lo pondría fuera del alcance de las pruebas
+ * justo donde un descuido lo desharía.
+ */
+export function confirmedPrices(verdict: Verdict): { partNumber: string; price: number }[] {
+  return verdict.prices
+    .filter((p) => p.status === 'applied')
+    .map((p) => ({ partNumber: p.partNumber, price: p.priceUSD }));
+}
+
+/**
+ * Un precio que se leyó en la respuesta y no se aplicó. Es lo que viaja hasta el
+ * correo que se le contesta al Approver, así que la forma se define aquí, del
+ * lado que la produce, y no en los dos extremos.
+ */
+export type UnappliedPrice = {
+  partNumber: string;
+  priceUSD: number;
+  /** Ausente => la pieza no está en la Replacement Request. */
+  suggestedPriceUSD?: number;
+};
+
+/** Lo que se le contesta al Approver: cada precio que se leyó y no se aplicó. */
+export function unappliedPrices(verdict: Verdict): UnappliedPrice[] {
+  return verdict.prices
+    .filter((p) => p.status !== 'applied')
+    .map((p) => ({
+      partNumber: p.partNumber,
+      priceUSD: p.priceUSD,
+      ...(p.status === 'out_of_bounds' ? { suggestedPriceUSD: p.suggestedPriceUSD } : {}),
+    }));
 }
 
 /** Un modelo que devuelve 1.5 o -2 no ensancha ni estrecha el umbral. */

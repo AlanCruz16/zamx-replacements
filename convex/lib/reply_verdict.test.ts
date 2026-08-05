@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'vitest';
 import {
   CONFIDENCE_THRESHOLD,
+  confirmedPrices,
+  isApproverAddress,
   screenInboundMessage,
+  unappliedPrices,
   verdictForReply,
   type InboundMessage,
   type ReplyInterpretation,
@@ -105,6 +108,14 @@ describe('quién puede mover una Replacement Request', () => {
     const v = verdict({ message: { subject: 'RE: REQ-OTRA999' } });
 
     expect(v.outcome).toBeUndefined();
+  });
+
+  test('la misma regla dice a quién puede escribirle el sistema', () => {
+    // La ruta que le contesta al Approver recibe la dirección en el cuerpo; sin
+    // esta comprobación sería un remitente de correo abierto.
+    expect(isApproverAddress('  Ventas@Ziehl-Abegg.MX ', APPROVERS)).toBe(true);
+    expect(isApproverAddress('intruso@internet.com', APPROVERS)).toBe(false);
+    expect(isApproverAddress('ventas@ziehl-abegg.mx', [])).toBe(false);
   });
 
   test('el sondeo puede cribar el mensaje antes de gastar una llamada al modelo', () => {
@@ -255,10 +266,22 @@ describe('un precio extraído se acota contra el Suggested Price', () => {
     expect(v.replyToApprover).toBe('price_for_unknown_part');
   });
 
-  test('el Outcome se conserva aunque un precio quede fuera de banda', () => {
-    // Qué decidió el Approver y qué cifra se pudo aplicar son dos hechos
-    // distintos; el ticket 10 decide qué hace la tubería con el segundo.
-    expect(precios(17_000).outcome).toBe('priced_differently');
+  test('con un precio sin aplicar no hay Outcome: la Request se queda en revisión', () => {
+    // Fijarlo igualmente era peor que perder el precio: un Outcome cotizado
+    // dispara el Quote Document, y la pieza cuyo precio se descartó volvía a
+    // caer en su Suggested Price — el Customer recibía un compromiso con la
+    // cifra que nunca debe ver, y la confirmación del Approver llegaba a una
+    // decisión ya tomada, que no se revisa.
+    expect(precios(17_000).outcome).toBeUndefined();
+    expect(precios(1000, 'P-999').outcome).toBeUndefined();
+
+    // Las palabras del Approver sí se conservan: son suyas, y la Request sigue
+    // esperando su confirmación.
+    expect(precios(17_000).explanation).toBe('El Approver aprueba los precios sin cambios.');
+  });
+
+  test('con todos los precios aplicados sí hay Outcome', () => {
+    expect(precios(1200).outcome).toBe('priced_differently');
   });
 
   test('aprobar sin cambios ignora cualquier precio suelto de la respuesta', () => {
@@ -280,5 +303,48 @@ describe('un precio extraído se acota contra el Suggested Price', () => {
     });
 
     expect(v.deliveryWeeks).toBe(12);
+  });
+});
+
+describe('qué se escribe y qué se contesta a partir del veredicto', () => {
+  function conPrecios(...precios: { partNumber: string; price: number }[]) {
+    return verdict({
+      interpretation: { classification: 'priced_differently', newPricesUSD: precios },
+    });
+  }
+
+  test('sólo los precios aplicados se convierten en Confirmed Price', () => {
+    // Lo que decide qué se escribe es el veredicto, no la cáscara de correo: si
+    // filtrar quedara en el poller, un precio fuera de banda volvería a entrar
+    // al registro en cuanto alguien tocara ese bucle.
+    const v = conPrecios(
+      { partNumber: 'P-001', price: 1200 },
+      { partNumber: 'P-001', price: 17_000 }
+    );
+
+    expect(confirmedPrices(v)).toEqual([{ partNumber: 'P-001', price: 1200 }]);
+  });
+
+  test('un veredicto con todos los precios fuera de banda no escribe ninguno', () => {
+    const v = conPrecios({ partNumber: 'P-001', price: 17_000 });
+
+    expect(confirmedPrices(v)).toEqual([]);
+  });
+
+  test('los precios no aplicados son los que hay que contarle al Approver', () => {
+    const v = conPrecios(
+      { partNumber: 'P-001', price: 1200 },
+      { partNumber: 'P-001', price: 17_000 },
+      { partNumber: 'P-999', price: 300 }
+    );
+
+    expect(unappliedPrices(v)).toEqual([
+      { partNumber: 'P-001', priceUSD: 17_000, suggestedPriceUSD: 1000 },
+      { partNumber: 'P-999', priceUSD: 300 },
+    ]);
+  });
+
+  test('sin nada que contar la lista viene vacía', () => {
+    expect(unappliedPrices(conPrecios({ partNumber: 'P-001', price: 1200 }))).toEqual([]);
   });
 });
