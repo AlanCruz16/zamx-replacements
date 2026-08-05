@@ -60,7 +60,7 @@ export async function POST(req: Request) {
     const emailHtml = await render(
       React.createElement(ClientQuoteEmail, {
         fullName: user.fullName,
-        quoteId: pdfProps.requestId,
+        requestId: pdfProps.requestId,
       })
     );
 
@@ -68,7 +68,10 @@ export async function POST(req: Request) {
     const { data: resendData, error } = await resend.emails.send({
       from: QUOTE_SENDER,
       to: [user.email], // Se envía al correo registrado por el cliente
-      subject: `Su cotización ZAMX-Q-${pdfProps.requestId} de ZIEHL-ABEGG México`,
+      // El código `REQ-XXXXXX` es el identificador, y es el mismo que el
+      // Customer verá en el asunto, en el cuerpo y en el Quote Document
+      // adjunto. Prefijarlo con un `ZAMX-Q-` inventaba un segundo esquema.
+      subject: `Su cotización ${pdfProps.requestId} de ZIEHL-ABEGG México`,
       html: emailHtml,
       attachments: [
         {

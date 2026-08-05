@@ -178,7 +178,13 @@ describe('POST /api/send-client-quote', () => {
     expect(sendEmail).toHaveBeenCalledOnce();
     const [enviado] = sendEmail.mock.calls[0];
     expect(enviado.to).toEqual(['ana@example.com']);
+    // El asunto nombra la Replacement Request por su código y por nada más. El
+    // `ZAMX-Q-` que lo prefijaba inventaba un segundo esquema de identificador y
+    // se lo pegaba delante al primero, así que el Customer leía
+    // `ZAMX-Q-REQ-V59X9B` en la bandeja y `REQ-V59X9B` dentro del PDF adjunto.
     expect(enviado.subject).toContain('REQ-V59X9B');
+    expect(enviado.subject).not.toContain('ZAMX-Q-');
+    expect(enviado.subject).toMatch(/(^|\s)REQ-V59X9B(\s|$)/);
     expect(enviado.html).toContain('Ana Cliente');
 
     // El PDF se renderizó de verdad: un Buffer que empieza con la firma %PDF-.

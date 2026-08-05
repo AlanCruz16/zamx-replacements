@@ -123,7 +123,11 @@ describe('POST /api/send-rejection-email', () => {
     expect(sendEmail).toHaveBeenCalledOnce();
     const [enviado] = sendEmail.mock.calls[0];
     expect(enviado.to).toEqual(['ana@example.com']);
+    // Un solo identificador, el mismo que el cuerpo y el resto del recorrido:
+    // sin el `ZAMX-Q-` que le inventaba un segundo esquema delante.
     expect(enviado.subject).toContain('REQ-V59X9B');
+    expect(enviado.subject).not.toContain('ZAMX-Q-');
+    expect(enviado.subject).toMatch(/(^|\s)REQ-V59X9B(\s|$)/);
     expect(enviado.attachments).toBeUndefined();
 
     // El hecho registrado es «se le explicó», no «se le envió el Quote
@@ -133,5 +137,26 @@ describe('POST /api/send-rejection-email', () => {
       { body: { quoteId: 'quote_1' }, secret: INTERNAL_SECRET },
     ]);
     expect(convex.to(INTERNAL_PATHS.quoteDocumentSent)).toEqual([]);
+  });
+
+  test('un Outcome que esta ruta no sabe explicar no le llega al Customer', async () => {
+    convex.reply(INTERNAL_PATHS.details, quoteDetails());
+    const POST = await loadHandler();
+
+    // `priced_as_suggested` lleva Quote Document; por aquí sólo salen los tres
+    // Outcomes que se le explican al Customer sin él. La plantilla caía en su
+    // rama por defecto y mandaba un correo con encabezado genérico y cuerpo
+    // vacío: el Customer se enteraba de que pasó algo, pero no de qué.
+    const res = await POST(
+      request(
+        { 'x-internal-secret': INTERNAL_SECRET },
+        { ...rejectionBody(), outcome: 'priced_as_suggested' }
+      )
+    );
+
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+    // Y no se registra como explicado algo que nunca se explicó.
+    expect(convex.to(INTERNAL_PATHS.rejectionExplained)).toEqual([]);
   });
 });

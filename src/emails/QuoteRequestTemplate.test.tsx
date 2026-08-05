@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest';
-import { render } from 'react-email';
 import * as React from 'react';
 import { QuoteRequestTemplate } from './QuoteRequestTemplate';
+import { renderEmail } from '@/test/render-email';
 
 /**
  * El correo al Approver, renderizado de verdad bajo jsdom.
@@ -40,19 +40,9 @@ const UNPRICEABLE_PRODUCT = {
   suggestedDeliveryWeeksMax: 30,
 };
 
-/** El HTML renderizado, con las entidades deshechas para poder buscar texto. */
-async function renderEmail(props: Parameters<typeof QuoteRequestTemplate>[0]) {
-  const html = await render(React.createElement(QuoteRequestTemplate, props));
-  const text = html
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&#x27;|&apos;/g, "'")
-    .replace(/&#x2F;/g, '/')
-    .replace(/&quot;/g, '"')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/\s+/g, ' ');
-
-  return { html, text };
+/** El correo del Approver, con sus props tipados. */
+function renderQuoteRequest(props: Parameters<typeof QuoteRequestTemplate>[0]) {
+  return renderEmail(React.createElement(QuoteRequestTemplate, props));
 }
 
 function baseProps() {
@@ -68,7 +58,7 @@ function baseProps() {
 
 describe('el correo de solicitud al Approver', () => {
   test('lleva los datos de contacto del Customer para poder llamarle', async () => {
-    const { text } = await renderEmail(baseProps());
+    const { text } = await renderQuoteRequest(baseProps());
 
     expect(text).toContain('Ana Márquez');
     expect(text).toContain('Refrigeración del Norte');
@@ -77,7 +67,7 @@ describe('el correo de solicitud al Approver', () => {
   });
 
   test('dice la moneda en cada cifra, con separador de miles y dos decimales', async () => {
-    const { text } = await renderEmail(baseProps());
+    const { text } = await renderQuoteRequest(baseProps());
 
     // El Suggested Price por unidad y los tres totales. Un `3100` a secas no
     // dice si son pesos o dólares, y es la mitad humana del desliz de moneda
@@ -94,13 +84,13 @@ describe('el correo de solicitud al Approver', () => {
   });
 
   test('da el Delivery Estimate sugerido como rango, con su unidad', async () => {
-    const { text } = await renderEmail(baseProps());
+    const { text } = await renderQuoteRequest(baseProps());
 
     expect(text).toMatch(/25\s*[–-]\s*30 semanas/);
   });
 
   test('dice cómo redactar la respuesta para cada Outcome', async () => {
-    const { text } = await renderEmail(baseProps());
+    const { text } = await renderQuoteRequest(baseProps());
 
     // Las seis salidas del glosario, cada una con la frase que el intérprete
     // entiende. Decirle al Approver cómo redactar sale más barato que mejorar
@@ -114,7 +104,7 @@ describe('el correo de solicitud al Approver', () => {
   });
 
   test('el precio de ejemplo es el de la propia solicitud, no una cifra inventada', async () => {
-    const { text } = await renderEmail(baseProps());
+    const { text } = await renderQuoteRequest(baseProps());
 
     // Un ejemplo con una cifra ajena al Suggested Price de la pieza es un
     // ejemplo que la banda del ticket 10 rechazaría: el Approver que lo copia
@@ -124,7 +114,7 @@ describe('el correo de solicitud al Approver', () => {
   });
 
   test('no promete un tiempo de entrega por pieza, que el registro no puede guardar', async () => {
-    const { text } = await renderEmail(baseProps());
+    const { text } = await renderQuoteRequest(baseProps());
 
     // `processEmployeeResponse` aplica un único `newDeliveryWeeks` a todos los
     // productos, así que dos plazos en una respuesta acaban con uno estampado
@@ -134,7 +124,7 @@ describe('el correo de solicitud al Approver', () => {
   });
 
   test('marca la pieza que el sistema no pudo cotizar y pide un precio para ella', async () => {
-    const { text } = await renderEmail({
+    const { text } = await renderQuoteRequest({
       ...baseProps(),
       products: [PRICED_PRODUCT, UNPRICEABLE_PRODUCT],
     });
@@ -147,7 +137,7 @@ describe('el correo de solicitud al Approver', () => {
   });
 
   test('omite el teléfono sin dejar un hueco cuando el Customer no lo dio', async () => {
-    const { text } = await renderEmail({
+    const { text } = await renderQuoteRequest({
       ...baseProps(),
       customer: { ...CUSTOMER, phone: undefined },
     });

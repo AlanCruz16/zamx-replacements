@@ -3,13 +3,13 @@ import * as React from 'react';
 
 interface ClientQuoteEmailProps {
   fullName: string;
-  quoteId: string;
+  requestId: string;
 }
 
-export const ClientQuoteEmail = ({ fullName, quoteId }: ClientQuoteEmailProps) => (
+export const ClientQuoteEmail = ({ fullName, requestId }: ClientQuoteEmailProps) => (
   <Html>
     <Head />
-    <Preview>Su cotización oficial de ZIEHL-ABEGG México ({quoteId})</Preview>
+    <Preview>Su cotización oficial de ZIEHL-ABEGG México ({requestId})</Preview>
     <Body style={main}>
       <Container style={container}>
         <Heading style={h1}>Cotización ZIEHL-ABEGG</Heading>
@@ -18,7 +18,8 @@ export const ClientQuoteEmail = ({ fullName, quoteId }: ClientQuoteEmailProps) =
 
         <Text style={text}>
           Agradecemos su interés en nuestros productos. Adjunto a este correo encontrará la
-          cotización oficial **{quoteId}** correspondiente a su solicitud de piezas de reemplazo.
+          cotización oficial <strong>{requestId}</strong> correspondiente a su solicitud de piezas
+          de reemplazo.
         </Text>
 
         <Text style={text}>
