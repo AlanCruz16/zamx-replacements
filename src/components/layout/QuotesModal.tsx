@@ -3,11 +3,33 @@
 import React from 'react';
 import { useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
-import type { Doc } from '../../../convex/_generated/dataModel';
-import { confirmedQuoteLines } from '@/lib/confirmed-prices';
+import { quoteDocumentLines } from '@/lib/quote-document';
+import { outcomeBadge, type BadgeTone } from '@/lib/outcome-badge';
 import { X, FileText, Clock, CheckCircle, AlertCircle, Calendar, Download } from 'lucide-react';
 
-type Outcome = NonNullable<Doc<'quotes'>['outcome']>;
+/** La pintura de cada tono. La decisión de qué tono toca vive en `outcomeBadge`. */
+const TONE_STYLES: Record<BadgeTone, { bg: string; icon: React.ReactNode }> = {
+  awaiting: {
+    bg: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800/50',
+    icon: <Clock size={14} className="mr-1" />,
+  },
+  sending: {
+    bg: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800/50',
+    icon: <CheckCircle size={14} className="mr-1" />,
+  },
+  sent: {
+    bg: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800/50',
+    icon: <CheckCircle size={14} className="mr-1" />,
+  },
+  rejected: {
+    bg: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800/50',
+    icon: <AlertCircle size={14} className="mr-1" />,
+  },
+  blocked: {
+    bg: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800/50',
+    icon: <AlertCircle size={14} className="mr-1" />,
+  },
+};
 
 interface QuotesModalProps {
   isOpen: boolean;
@@ -18,55 +40,6 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
   const quotes = useQuery(api.quotes.getUserQuotes);
 
   if (!isOpen) return null;
-
-  /**
-   * El Outcome y la notificación al Customer son dos hechos independientes, así
-   * que la insignia los lee por separado: qué decidió Ventas, y si ya se le avisó.
-   * Conflarlos es lo que mostraba una pieza descontinuada como cotización
-   * entregada.
-   */
-  const getOutcomeBadge = (outcome: Outcome | undefined, notified: boolean) => {
-    if (outcome === undefined)
-      return {
-        label: 'En revisión por Ventas',
-        bg: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800/50',
-        icon: <Clock size={14} className="mr-1" />,
-      };
-
-    switch (outcome) {
-      case 'priced_as_suggested':
-      case 'priced_differently':
-        return notified
-          ? {
-              label: 'Enviada al correo',
-              bg: 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800/50',
-              icon: <CheckCircle size={14} className="mr-1" />,
-            }
-          : {
-              label: 'Procesando envío...',
-              bg: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800/50',
-              icon: <CheckCircle size={14} className="mr-1" />,
-            };
-      case 'oem_restricted':
-        return {
-          label: 'Exclusiva del fabricante (OEM)',
-          bg: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800/50',
-          icon: <AlertCircle size={14} className="mr-1" />,
-        };
-      case 'discontinued':
-        return {
-          label: 'Pieza descontinuada',
-          bg: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800/50',
-          icon: <AlertCircle size={14} className="mr-1" />,
-        };
-      case 'blocked_pending_info':
-        return {
-          label: 'Requiere más información',
-          bg: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800/50',
-          icon: <AlertCircle size={14} className="mr-1" />,
-        };
-    }
-  };
 
   const formatCurrency = (value: number) => {
     return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
@@ -123,12 +96,13 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
           ) : (
             <div className="space-y-4">
               {quotes.map((quote) => {
-                const badge = getOutcomeBadge(quote.outcome, !!quote.customerNotifiedAt);
-                // Sólo los Confirmed Prices llegan al Customer, y un precio
-                // ausente significa que no hay precio: el total se calla entero
-                // hasta que todas las piezas tienen uno. Misma regla que el Quote
-                // Document, mismo módulo.
-                const lines = confirmedQuoteLines(quote.products);
+                const badge = outcomeBadge(quote.outcome, !!quote.customerNotifiedAt);
+                const tone = TONE_STYLES[badge.tone];
+                // El total y el enlace al PDF son la misma pregunta que se hace
+                // el servidor — ¿existe un Quote Document? — resuelta con el
+                // mismo módulo. Ocultar el enlace no es la defensa; la ruta lo
+                // vuelve a comprobar.
+                const lines = quoteDocumentLines(quote);
                 const date = new Date(quote._creationTime).toLocaleDateString('es-MX', {
                   day: 'numeric',
                   month: 'short',
@@ -148,9 +122,9 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
                           {quote.requestId}
                         </span>
                         <span
-                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${badge.bg}`}
+                          className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${tone.bg}`}
                         >
-                          {badge.icon}
+                          {tone.icon}
                           {badge.label}
                         </span>
                       </div>
@@ -166,9 +140,12 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
                             <span className="text-gray-700 dark:text-gray-300 font-medium">
                               {p.quantity}x <span className="text-gray-500">{p.partNumber}</span>
                             </span>
-                            {p.confirmedPriceUSD !== undefined && (
+                            {/* La línea se calla por la misma razón que el total:
+                                una pieza que no se puede vender no lleva precio
+                                aunque tenga uno guardado. */}
+                            {lines !== null && (
                               <span className="text-gray-500">
-                                {formatCurrency(p.confirmedPriceUSD * p.quantity)}
+                                {formatCurrency(lines.products[idx].subtotalUSD)}
                               </span>
                             )}
                           </div>
@@ -184,10 +161,10 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
                         </div>
                       </div>
 
-                      {/* Un Quote Document existe sólo cuando todas las piezas
-                          tienen Confirmed Price; haber avisado al Customer no
-                          basta, porque también se le avisa de un rechazo. */}
-                      {!!quote.customerNotifiedAt && lines !== null && (
+                      {/* Haber avisado al Customer no basta para ofrecer el PDF,
+                          porque también se le avisa de un rechazo: lo que manda
+                          es que la Replacement Request tenga Quote Document. */}
+                      {lines !== null && (
                         <a
                           href={`/api/download-quote?quoteId=${quote.requestId}`}
                           target="_blank"

@@ -3,7 +3,7 @@ import { renderToBuffer } from '@react-pdf/renderer';
 import { Resend } from 'resend';
 import { QuoteDocument } from '@/components/pdf/QuoteDocument';
 import { ClientQuoteEmail } from '@/emails/ClientQuoteEmail';
-import { confirmedQuoteLines } from '@/lib/confirmed-prices';
+import { quoteDocumentLines } from '@/lib/quote-document';
 import {
   authorizeInternalRequest,
   fetchQuoteDetails,
@@ -40,15 +40,13 @@ export async function POST(req: Request) {
 
     const { quote, user } = data;
 
-    // 2. Preparar los datos para el PDF. Sin Confirmed Price en todas las piezas
-    // no hay Quote Document: un precio ausente no es cero.
-    const lines = confirmedQuoteLines(quote.products);
+    // 2. Preparar los datos para el PDF. Misma regla que la descarga, mismo
+    // módulo: sin Outcome con precio y sin Confirmed Price en todas las piezas
+    // no hay Quote Document que adjuntar.
+    const lines = quoteDocumentLines(quote);
     if (!lines) {
       return NextResponse.json(
-        {
-          success: false,
-          error: 'La solicitud no tiene un precio confirmado para todas sus piezas',
-        },
+        { success: false, error: 'Esta Replacement Request no tiene Quote Document' },
         { status: 409 }
       );
     }

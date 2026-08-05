@@ -206,4 +206,22 @@ describe('POST /api/send-client-quote', () => {
     expect(sendEmail).not.toHaveBeenCalled();
     expect(convex.to(INTERNAL_PATHS.quoteDocumentSent)).toEqual([]);
   });
+
+  test.each(['oem_restricted', 'discontinued', 'blocked_pending_info'] as const)(
+    'con Outcome %s no se adjunta un Quote Document aunque haya precios',
+    async (outcome) => {
+      const detalles = quoteDetails();
+      detalles.quote.outcome = outcome;
+      convex.reply(INTERNAL_PATHS.details, detalles);
+      const POST = await loadHandler();
+
+      const res = await POST(
+        request({ 'x-internal-secret': INTERNAL_SECRET }, { requestId: 'REQ-V59X9B' })
+      );
+
+      expect(res.status).toBe(409);
+      expect(sendEmail).not.toHaveBeenCalled();
+      expect(convex.to(INTERNAL_PATHS.quoteDocumentSent)).toEqual([]);
+    }
+  );
 });
