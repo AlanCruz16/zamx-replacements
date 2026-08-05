@@ -555,6 +555,116 @@ describe('el Outcome y la notificación al Customer se mueven por separado', () 
   });
 });
 
+/**
+ * Ticket 11 — llegar a un Outcome es una sola transición.
+ *
+ * No se prueba la carrera corriéndola: se prueba que la mutación **rechaza la
+ * segunda escritura**, que es la conducta que la cierra. La comprobación de si
+ * ya hay Outcome y la escritura ocurren dentro de la misma mutación, y una
+ * mutación de Convex es una transacción, así que dos sondeos solapados no pueden
+ * pasar los dos por la comprobación.
+ */
+describe('llegar a un Outcome es una transición atómica', () => {
+  test('fijar el Outcome de una Request que no tiene ninguno se aplica, y lo reporta', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    const resultado = await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_as_suggested',
+      explanation: 'Precios correctos.',
+    });
+
+    expect(resultado).toMatchObject({ kind: 'settled', outcome: 'priced_as_suggested' });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.outcome).toBe('priced_as_suggested');
+  });
+
+  test('un segundo intento sobre una Request ya decidida no la cambia, y lo reporta', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'discontinued',
+      explanation: 'Pieza descontinuada.',
+    });
+
+    // Gana la primera respuesta. Un correo extraviado del mismo hilo no revisa
+    // una decisión que al Customer puede que ya se le haya comunicado.
+    const segundo = await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_as_suggested',
+      explanation: 'Perdón, sí la tenemos.',
+    });
+
+    expect(segundo).toMatchObject({ kind: 'already_settled', outcome: 'discontinued' });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.outcome).toBe('discontinued');
+  });
+
+  test('el segundo intento deja intactos los Confirmed Prices y la explicación del primero', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+    const suggested = creada.products[0].suggestedPriceUSD!;
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_differently',
+      explanation: 'Va en 5555.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 5555 }],
+      newDeliveryWeeks: 12,
+    });
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_differently',
+      explanation: 'Mejor en 9999.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 9999 }],
+      newDeliveryWeeks: 40,
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.products[0].confirmedPriceUSD).toBe(5555);
+    expect(stored!.products[0].confirmedDeliveryWeeksMin).toBe(12);
+    expect(stored!.products[0].suggestedPriceUSD).toBe(suggested);
+    expect(stored!.approverExplanation).toBe('Va en 5555.');
+  });
+
+  test('una respuesta que no produce Outcome reporta que la Request sigue en revisión', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    const resultado = await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      explanation: 'Respuesta ambigua.',
+    });
+
+    // Distinto de `already_settled`: aquí no hay decisión que respetar, y la
+    // siguiente respuesta del Approver sí podrá fijar el Outcome.
+    expect(resultado).toMatchObject({ kind: 'undecided' });
+  });
+
+  test('una Request inexistente falla en vez de reportar una transición', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t);
+
+    await expect(
+      t.mutation(internal.quotes.processEmployeeResponse, {
+        requestId: 'REQ-NOEXISTE',
+        outcome: 'discontinued',
+        explanation: 'Da igual.',
+      })
+    ).rejects.toThrow('REQ-NOEXISTE');
+  });
+});
+
 describe('quotes.getUserQuotes', () => {
   test('un llamador no autenticado es rechazado', async () => {
     const t = convexTest(schema, modules);

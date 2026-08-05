@@ -67,8 +67,6 @@ export const checkInbox = internalAction({
     }
 
     const messagesToProcess: InboundReply[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const results: any[] = [];
 
     try {
       await client.connect();
@@ -115,41 +113,33 @@ export const checkInbox = internalAction({
     }
 
     const successfulUids: number[] = [];
-    const uniqueMessagesMap = new Map<string, InboundReply>();
+
+    // Gana la primera respuesta, y también dentro de un mismo sondeo: de varias
+    // respuestas al mismo folio se procesa la del uid más bajo — el uid de IMAP
+    // crece con la llegada — y las demás se marcan leídas sin aplicarse. Quedarse
+    // con la última era la misma revisión de una decisión ya tomada que la
+    // mutación transaccional cierra entre sondeos.
+    const firstReplyPerRequest = new Map<string, InboundReply>();
 
     for (const msg of messagesToProcess) {
-      if (
-        !uniqueMessagesMap.has(msg.requestId) ||
-        uniqueMessagesMap.get(msg.requestId)!.uid < msg.uid
-      ) {
-        if (uniqueMessagesMap.has(msg.requestId)) {
-          successfulUids.push(uniqueMessagesMap.get(msg.requestId)!.uid);
-        }
-        uniqueMessagesMap.set(msg.requestId, msg);
-      } else {
-        successfulUids.push(msg.uid);
+      const kept = firstReplyPerRequest.get(msg.requestId);
+      if (kept === undefined) {
+        firstReplyPerRequest.set(msg.requestId, msg);
+        continue;
       }
+
+      const [first, later] = kept.uid <= msg.uid ? [kept, msg] : [msg, kept];
+      firstReplyPerRequest.set(msg.requestId, first);
+      successfulUids.push(later.uid);
     }
 
-    const uniqueMessagesToProcess = Array.from(uniqueMessagesMap.values());
-
-    for (const msg of uniqueMessagesToProcess) {
+    for (const msg of firstReplyPerRequest.values()) {
       console.log(`Procesando email recibido para ${msg.requestId}`);
       try {
         const quote = await ctx.runQuery(internal.quotes.getByRequestId, {
           requestId: msg.requestId,
         });
         if (quote) {
-          // Un Outcome presente significa que ya se decidió. Su ausencia — y sólo
-          // su ausencia — significa que sigue en revisión.
-          if (quote.outcome !== undefined) {
-            console.log(
-              `La cotización ${msg.requestId} ya fue procesada (outcome: ${quote.outcome}).`
-            );
-            successfulUids.push(msg.uid);
-            continue;
-          }
-
           // El cuerpo entra al modelo como mensaje de usuario, nunca como
           // instrucción, y lo que vuelve son datos crudos: quien decide es el
           // veredicto, que es puro y sí está probado.
@@ -161,7 +151,12 @@ export const checkInbox = internalAction({
             approverAddresses: approvers,
           });
 
-          const { outcome } = await ctx.runMutation(internal.quotes.processEmployeeResponse, {
+          // La única escritura, y también la única comprobación de si ya había
+          // Outcome: las dos ocurren dentro de esa transacción, no aquí. Este
+          // sondeo puede solaparse con otro, y entre leer y escribir hay una
+          // llamada al modelo por la red — comprobarlo desde fuera era la
+          // carrera. Lo que quede por hacer se decide sobre lo que reporta.
+          const transition = await ctx.runMutation(internal.quotes.processEmployeeResponse, {
             requestId: msg.requestId,
             outcome: verdict.outcome,
             explanation: verdict.explanation,
@@ -175,8 +170,21 @@ export const checkInbox = internalAction({
             newDeliveryWeeks: verdict.deliveryWeeks,
           });
 
-          results.push({ requestId: msg.requestId, outcome });
           successfulUids.push(msg.uid);
+
+          // Gana la primera respuesta. Un correo posterior del mismo hilo no
+          // revisa una decisión ya tomada, así que aquí no queda nada que
+          // notificarle al Customer: lo que falta es decírselo al Approver, que
+          // es el caso 3 del ticket 10. Se marca leído — dejarlo sin leer haría
+          // que cada sondeo gastara otra llamada al modelo en lo mismo.
+          if (transition.kind === 'already_settled') {
+            console.log(
+              `Respuesta a ${msg.requestId} no aplicada: ya tenía Outcome (${transition.outcome}).`
+            );
+            continue;
+          }
+
+          const outcome = transition.kind === 'settled' ? transition.outcome : undefined;
 
           const baseUrl = process.env.APP_URL;
           if (baseUrl) {
