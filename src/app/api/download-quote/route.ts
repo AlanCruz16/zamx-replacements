@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 import { renderToStream } from '@react-pdf/renderer';
 import { QuoteDocument } from '@/components/pdf/QuoteDocument';
-import { quoteDocumentLines } from '@/lib/quote-document';
+import { quoteDocumentProps } from '@/lib/quote-document-props';
 import { fetchQuoteDetails } from '@/lib/internal-api';
 import React from 'react';
 
@@ -40,35 +40,12 @@ export async function GET(req: Request) {
     // pregunta con dos mitades — el Outcome y los Confirmed Prices — y se hace
     // aquí, en el servidor, porque esta ruta se alcanza directa aunque el enlace
     // esté escondido.
-    const lines = quoteDocumentLines(quote);
-    if (!lines) {
+    const pdfProps = quoteDocumentProps(data);
+    if (!pdfProps) {
       return new NextResponse('Esta Replacement Request no tiene Quote Document', {
         status: 409,
       });
     }
-
-    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-    const date = new Date(quote._creationTime).toLocaleDateString('es-MX');
-    const validUntil = new Date(quote.expiresAt).toLocaleDateString('es-MX');
-
-    const pdfProps = {
-      quoteId: quote.requestId || quoteId,
-      requestId: quote.requestId,
-      date,
-      validUntil,
-      clientInfo: {
-        companyName: user.companyName,
-        fullName: user.fullName,
-        deliveryLocation: quote.products[0]?.deliveryLocation || '',
-      },
-      products: lines.products,
-      subtotal: lines.totals.subtotalUSD,
-      iva: lines.totals.taxUSD,
-      total: lines.totals.totalUSD,
-      employeeName: 'Ventas ZAMX',
-      employeeEmail: 'cotizaciones@ziehl-abegg.com.mx',
-      baseUrl,
-    };
 
     // 3. Renderizar el PDF a un Node Stream
     // @ts-expect-error Incompatibilidad de tipos entre react-pdf y React 19
@@ -79,7 +56,7 @@ export async function GET(req: Request) {
     return new NextResponse(stream as any, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="Cotizacion_${pdfProps.quoteId}.pdf"`,
+        'Content-Disposition': `inline; filename="Cotizacion_${pdfProps.requestId}.pdf"`,
       },
     });
   } catch (error) {

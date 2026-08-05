@@ -21,24 +21,20 @@ import { requireInternalSecret } from '../src/lib/internal-secret';
 type InboundReply = InboundMessage & { uid: number; requestId: string; sender: string };
 
 /**
- * A dónde apuntan los webhooks hacia Next, o `undefined` si no se pueden usar.
+ * A dónde apuntan los webhooks hacia Next, o `undefined` si no está configurado.
  *
- * Convex corre en la nube y no resuelve `localhost`, así que en desarrollo no
- * hay a dónde llamar: se dice en voz alta en vez de fallar cada envío por su
- * cuenta.
+ * Antes esta función descartaba además cualquier `APP_URL` con `localhost`, lo
+ * que apagaba el disparo del Quote Document entero en desarrollo. Ese descarte
+ * tapaba el logo del PDF, que se resolvía por red contra esta misma URL; ahora
+ * el logo va incrustado y no queda nada que proteger. Un `localhost` que Convex
+ * no alcance falla como lo que es —un `fetch` con error registrado— en vez de
+ * hacer que la mitad de la tubería no exista en desarrollo.
  */
-function webhookBaseUrl(requestId: string): string | undefined {
+function webhookBaseUrl(): string | undefined {
   const baseUrl = process.env.APP_URL;
 
   if (!baseUrl) {
     console.warn('APP_URL no está configurada, no se activarán los webhooks.');
-    return undefined;
-  }
-
-  if (baseUrl.includes('localhost')) {
-    console.log(
-      `Omitiendo los webhooks de ${requestId} porque estamos en localhost (Convex nube no puede resolverlo).`
-    );
     return undefined;
   }
 
@@ -206,7 +202,7 @@ export const checkInbox = internalAction({
 
           successfulUids.push(msg.uid);
 
-          const baseUrl = webhookBaseUrl(msg.requestId);
+          const baseUrl = webhookBaseUrl();
           const post = (path: string, body: unknown, label: string) =>
             baseUrl === undefined
               ? Promise.resolve()

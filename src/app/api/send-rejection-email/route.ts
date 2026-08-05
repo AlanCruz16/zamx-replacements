@@ -6,6 +6,7 @@ import {
   fetchQuoteDetails,
   markRejectionExplained,
 } from '@/lib/internal-api';
+import { QUOTE_SENDER } from '@/lib/addresses';
 import { render } from 'react-email';
 import React from 'react';
 
@@ -51,7 +52,7 @@ export async function POST(req: Request) {
 
     // 3. Enviar el correo usando Resend (sin PDF)
     const { data: resendData, error } = await resend.emails.send({
-      from: 'ZAMX Cotizaciones <cotizaciones@za.idcn.com.mx>', // Cambiar en prod a @ziehl-abegg.com.mx
+      from: QUOTE_SENDER,
       to: [user.email], // Se envía al correo registrado por el cliente
       subject: `Actualización sobre su solicitud ZAMX-Q-${quote.requestId || requestId}`,
       html: emailHtml,

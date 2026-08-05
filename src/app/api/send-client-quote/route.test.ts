@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { INTERNAL_PATHS, stubInternalConvex } from '@/test/internal-convex';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Ejemplo de referencia — Seam 2: la frontera del route handler.
@@ -190,6 +192,42 @@ describe('POST /api/send-client-quote', () => {
       { body: { quoteId: 'quote_1' }, secret: INTERNAL_SECRET },
     ]);
     expect(convex.to(INTERNAL_PATHS.rejectionExplained)).toEqual([]);
+  });
+
+  /**
+   * El fallo que arregla el ticket 17, comprobado sobre el PDF de verdad y no
+   * sobre los props. El logo se pasaba como `${baseUrl}/logo_final.png` con
+   * `baseUrl` cayendo a `http://localhost:3000`, así que el renderizador salía a
+   * la red: en la máquina de quien lo escribió el logo aparecía, y en cualquier
+   * otra parte el documento salía sin él. Sin URL base configurado, el logo
+   * tiene que seguir estando dentro del documento.
+   */
+  test('el Quote Document lleva el logo aunque no haya URL base configurado', async () => {
+    vi.stubEnv('NEXT_PUBLIC_APP_URL', '');
+    convex.reply(INTERNAL_PATHS.details, quoteDetails());
+    sendEmail.mockResolvedValue({ data: { id: 'email_1' }, error: null });
+    const POST = await loadHandler();
+
+    const res = await POST(
+      request({ 'x-internal-secret': INTERNAL_SECRET }, { requestId: 'REQ-V59X9B' })
+    );
+
+    expect(res.status).toBe(200);
+    const [{ attachments }] = sendEmail.mock.calls[0];
+    const pdf: Buffer = attachments[0].content;
+
+    // El PDF declara un XObject de imagen con las dimensiones exactas del PNG.
+    // Se leen del propio archivo, no se escriben aquí: así la afirmación sigue
+    // valiendo cuando alguien cambie el logo, y falla si el documento se queda
+    // sin él.
+    const png = readFileSync(join(process.cwd(), 'public', 'logo_final.png'));
+    const width = png.readUInt32BE(16);
+    const height = png.readUInt32BE(20);
+
+    const bytes = pdf.toString('latin1');
+    expect(bytes).toContain('/Subtype /Image');
+    expect(bytes).toContain(`/Width ${width}`);
+    expect(bytes).toContain(`/Height ${height}`);
   });
 
   test('sin Confirmed Price no se produce Quote Document ni se cotiza la pieza a cero', async () => {

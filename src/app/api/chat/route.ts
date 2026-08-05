@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { Resend } from 'resend';
 import { QuoteRequestTemplate } from '@/emails/QuoteRequestTemplate';
 import { createReplacementRequest } from '@/lib/internal-api';
+import { SUPPORT_SENDER } from '@/lib/addresses';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -91,7 +92,7 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
             // 2. Enviar el email con Resend
             try {
               await resend.emails.send({
-                from: 'ZAMX Soporte <soporte@za.idcn.com.mx>',
+                from: SUPPORT_SENDER,
                 to: [process.env.ADMIN_EMAIL as string], // Enviar al correo del administrador configurado en entorno
                 replyTo: process.env.IMAP_USER as string,
                 subject: `Nueva solicitud de cotización: [${result.requestId}]`,

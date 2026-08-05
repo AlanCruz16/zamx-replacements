@@ -150,12 +150,18 @@ const styles = StyleSheet.create({
   },
 });
 
-interface QuoteDocumentProps {
-  quoteId: string;
+export interface QuoteDocumentProps {
+  /**
+   * El folio `REQ-XXXXXX`. Es **uno**: nombra la Replacement Request, y el Quote
+   * Document se identifica con el mismo código sin numerarse aparte. Antes
+   * viajaba como `quoteId` y como `requestId`, dos props que las dos rutas
+   * llenaban con el mismo valor y que el documento imprimía en dos sitios como
+   * si pudieran diferir.
+   */
   requestId: string;
   date: string;
   validUntil: string;
-  clientInfo: {
+  customerInfo: {
     companyName: string;
     fullName: string;
     deliveryLocation: string;
@@ -172,26 +178,34 @@ interface QuoteDocumentProps {
   subtotal: number;
   iva: number;
   total: number;
-  employeeName: string;
-  employeeEmail: string;
-  baseUrl: string; // Para cargar el logo dinámicamente
+  /**
+   * A quién le escribe el Customer sobre este documento. No es el Approver que
+   * lo autorizó —el documento no dice quién puso el precio— sino el buzón de
+   * ventas de ZAMX; sale de `QUOTE_CONTACT` en `@/lib/addresses`.
+   */
+  contactName: string;
+  contactEmail: string;
+  /**
+   * El logo ya resuelto — un data URI, no un URL que haya que ir a buscar. El
+   * documento no sabe de dónde salió el archivo ni depende de que la aplicación
+   * se pueda alcanzar a sí misma por red; ver `@/lib/quote-logo`.
+   */
+  logoSrc: string;
 }
 
 export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
-  quoteId,
   requestId,
   date,
   validUntil,
-  clientInfo,
+  customerInfo,
   products,
   subtotal,
   iva,
   total,
-  employeeName,
-  employeeEmail,
-  baseUrl,
+  contactName,
+  contactEmail,
+  logoSrc,
 }) => {
-  const logoUrl = `${baseUrl}/logo_final.png`;
   // La Delivery Estimate se cotiza como rango de semanas enteras, y es de cada
   // pieza: colapsar rangos distintos a un mínimo y un máximo globales anunciaría
   // un rango que ninguna pieza tiene.
@@ -209,7 +223,7 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
         {/* TOP LOGO */}
         <View style={styles.topLogoContainer}>
           {/* eslint-disable-next-line jsx-a11y/alt-text */}
-          <Image src={logoUrl} style={styles.logo} />
+          <Image src={logoSrc} style={styles.logo} />
         </View>
 
         {/* HEADER */}
@@ -220,9 +234,9 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
             </Text>
             <View style={styles.customerData}>
               <Text style={styles.compactText}>Cliente:</Text>
-              <Text style={styles.compactText}>{clientInfo.companyName}</Text>
-              <Text style={styles.compactText}>{clientInfo.fullName}</Text>
-              <Text style={styles.compactText}>{clientInfo.deliveryLocation}</Text>
+              <Text style={styles.compactText}>{customerInfo.companyName}</Text>
+              <Text style={styles.compactText}>{customerInfo.fullName}</Text>
+              <Text style={styles.compactText}>{customerInfo.deliveryLocation}</Text>
               <Text style={styles.compactText}>MEX</Text>
             </View>
           </View>
@@ -233,15 +247,15 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
             <View style={styles.metaData}>
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>n° de cotización:</Text>
-                <Text style={styles.metaValue}>{quoteId}</Text>
+                <Text style={styles.metaValue}>{requestId}</Text>
               </View>
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}>contacto:</Text>
-                <Text style={styles.metaValue}>{employeeName}</Text>
+                <Text style={styles.metaValue}>{contactName}</Text>
               </View>
               <View style={styles.metaRow}>
                 <Text style={styles.metaLabel}></Text>
-                <Text style={styles.metaValue}>{employeeEmail}</Text>
+                <Text style={styles.metaValue}>{contactEmail}</Text>
               </View>
             </View>
           </View>
@@ -265,7 +279,7 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
 
         {/* GREETING */}
         <View style={styles.greeting}>
-          <Text>Estimado/a {clientInfo.fullName},</Text>
+          <Text>Estimado/a {customerInfo.fullName},</Text>
           <Text>Estamos agradecidos por su solicitud de cotización.</Text>
           <Text>Nos complace ofrecerle lo siguiente:</Text>
         </View>
@@ -337,14 +351,13 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
           <Text>Nuestra oferta no es obligatoria y está sujeta a cualquier cambio.</Text>
           <Text>Le pedimos referirse a la oferta mencionada al momento de enviar la orden.</Text>
           <Text style={{ marginTop: 5 }}>
-            Si está interesado en proceder con la compra, por favor envíe un correo a{' '}
-            {employeeEmail}
+            Si está interesado en proceder con la compra, por favor envíe un correo a {contactEmail}
           </Text>
 
           <Text style={{ marginTop: 15 }}>Atentamente</Text>
           <Text>ZIEHL-ABEGG MEXICO</Text>
 
-          <Text style={styles.signatureName}>{employeeName}</Text>
+          <Text style={styles.signatureName}>{contactName}</Text>
           <Text style={styles.automatedNote}>
             (esta cotización fue generada automáticamente - válida sin firma)
           </Text>

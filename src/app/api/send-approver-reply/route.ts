@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import { authorizeInternalRequest } from '@/lib/internal-api';
+import { QUOTE_SENDER } from '@/lib/addresses';
 import { composeApproverReply, type ApproverReplyPayload } from '@/lib/approver-reply';
 import { approverAddresses } from '../../../../convex/lib/approvers';
 import { isApproverAddress } from '../../../../convex/lib/reply_verdict';
@@ -57,7 +58,7 @@ export async function POST(req: Request) {
     }
 
     const { data, error } = await resend.emails.send({
-      from: 'ZAMX Cotizaciones <cotizaciones@za.idcn.com.mx>',
+      from: QUOTE_SENDER,
       to: [to],
       ...(mailbox ? { replyTo: mailbox } : {}),
       subject,
