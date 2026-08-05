@@ -63,13 +63,14 @@ export function ExpandableTabs({
     onChange?.(null);
   });
 
+  // Una pulsación, una acción. `selected` solo decide el resaltado y qué título
+  // se despliega; encadenarlo al aviso obligaba a pulsar dos veces, y una
+  // pestaña que se llama `ES / en` tiene que cambiar el idioma a la primera.
+  // El `null` sigue existiendo, pero solo lo emite el clic fuera de aquí abajo,
+  // que es deselección y no acción.
   const handleSelect = (index: number) => {
-    if (selected === index) {
-      onChange?.(index);
-      setSelected(null);
-    } else {
-      setSelected(index);
-    }
+    setSelected(index);
+    onChange?.(index);
   };
 
   const Separator = () => <div className="mx-1 h-[24px] w-[1.2px] bg-border" aria-hidden="true" />;
