@@ -132,6 +132,24 @@ describe('quotes.create', () => {
     expect(result.products[0].suggestedPriceUSD).toBeUndefined();
   });
 
+  test('devuelve los datos de contacto del Customer, para que el Approver pueda llamarle', async () => {
+    const t = convexTest(schema, modules);
+    await seedRule(t);
+    const clerkId = await seedCustomer(t, 'user_ana', 'Ana');
+
+    const result = await createQuote(t, clerkId);
+
+    // Salen del registro y no de lo que manda el navegador: el correo al
+    // Approver es la superficie donde se decide sin abrir la aplicación, y con
+    // sólo el nombre una solicitud ambigua no se resuelve con una llamada.
+    // Ver `src/emails/QuoteRequestTemplate.tsx`.
+    expect(result.customer).toEqual({
+      fullName: 'Ana',
+      companyName: 'Empresa de Ana',
+      email: 'user_ana@example.com',
+    });
+  });
+
   test('una Replacement Request nace sin Outcome, que es lo que significa en revisión', async () => {
     const t = convexTest(schema, modules);
     const clerkId = await seed(t);

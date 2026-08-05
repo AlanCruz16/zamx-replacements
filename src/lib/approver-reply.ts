@@ -1,5 +1,6 @@
 import type { Outcome } from '../../convex/lib/outcome';
 import type { ReplyReason, UnappliedPrice } from '../../convex/lib/reply_verdict';
+import { usd } from './money';
 
 /**
  * Qué se le contesta al Approver cuando el sistema no puede actuar sobre su
@@ -35,19 +36,6 @@ const OUTCOME_LABELS: Record<Outcome, string> = {
   discontinued: 'marcada como descontinuada',
   blocked_pending_info: 'a la espera de más información del cliente',
 };
-
-/**
- * Toda cifra lleva su moneda escrita. Los límites de la banda cogen el desliz
- * de moneda; decir «USD» en cada número es lo que evita que ocurra.
- */
-function usd(amount: number): string {
-  return `${amount.toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })} USD`;
-}
 
 /**
  * El asunto lleva el folio porque es lo que identifica de qué Replacement

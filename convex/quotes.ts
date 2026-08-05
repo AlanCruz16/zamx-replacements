@@ -75,6 +75,15 @@ export const create = internalMutation({
       quoteId,
       requestId,
       products: processedProducts,
+      // Con quién hablar si la solicitud resulta ambigua. Sale de este registro
+      // y no de lo que el chat manda desde el navegador: ese nombre lo escribe
+      // quien hace la petición, y era lo único que veía el Approver.
+      customer: {
+        fullName: user.fullName,
+        companyName: user.companyName,
+        email: user.email,
+        ...(user.phone === undefined ? {} : { phone: user.phone }),
+      },
       // Derivados, no almacenados. Son los totales sugeridos, sólo para el
       // Approver: los productos sin Suggested Price no suman nada.
       ...suggestedTotals(processedProducts),

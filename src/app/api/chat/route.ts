@@ -97,7 +97,10 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
                 subject: `Nueva solicitud de cotización: [${result.requestId}]`,
                 react: QuoteRequestTemplate({
                   requestId: result.requestId,
-                  userName,
+                  // Del registro, no de `data.userName`: al Approver le hace
+                  // falta con quién hablar, y el nombre que llega del navegador
+                  // no trae empresa, correo ni teléfono.
+                  customer: result.customer,
                   products: result.products,
                   subtotalUSD: result.subtotalUSD,
                   taxUSD: result.taxUSD,
