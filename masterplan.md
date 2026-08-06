@@ -324,6 +324,15 @@ PRECIOS Y TIEMPOS SUGERIDOS:
 INSTRUCCIONES PARA RESPONDER:
 ────────────────────────────────
 
+<!--
+  El bosquejo de abajo es de este plan y ya no es la fuente: el vocabulario que
+  el correo enseña y el que el intérprete lee salen los dos de
+  `src/lib/reply-vocabulary.ts`. Estuvo escrito a mano en dos sitios y se
+  separó, y una respuesta de una palabra dejó de clasificar (ticket 28); una
+  tercera copia aquí volvería a invitar a lo mismo.
+-->
+
+
 ✅ Si APRUEBA todos los precios y tiempos sugeridos:
    Responda con: "Aprobado" o "OK" o cualquier confirmación.
 
