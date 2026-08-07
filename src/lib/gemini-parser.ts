@@ -2,6 +2,8 @@ import { generateObject } from 'ai';
 import { google } from '@ai-sdk/google';
 import { z } from 'zod';
 import { CONFIDENCE_THRESHOLD, type ReplyInterpretation } from '../../convex/lib/reply_verdict';
+import { replyBodyForInterpretation } from './reply-body';
+import { vocabularyPromptBlock } from './reply-vocabulary';
 
 /**
  * La cáscara fina alrededor del modelo de lenguaje: construye el prompt, llama,
@@ -75,12 +77,7 @@ Replacement Request:
 - Delivery Estimate propuesta: ${first?.suggestedDeliveryWeeksMin} a ${first?.suggestedDeliveryWeeksMax} semanas
 - Todas las cifras están en USD.
 
-Clasifica la intención del Approver según estas reglas:
-- "priced_as_suggested": autoriza los Suggested Prices y los plazos sin cambios.
-- "priced_differently": indica un precio nuevo para algún producto o un plazo de entrega nuevo.
-- "oem_restricted": indica que la pieza es exclusiva de su fabricante original (OEM) y no se puede vender directo.
-- "discontinued": indica que la pieza está descontinuada y no tiene reemplazo directo.
-- "blocked_pending_info": pide más información al Customer (por ejemplo, fotos de la placa).
+${vocabularyPromptBlock()}
 
 Extrae precios y plazos sólo si el Approver los mencionó explícitamente.
 Si la intención no es clara, "confidence" debe ser menor a ${CONFIDENCE_THRESHOLD}.
@@ -99,8 +96,12 @@ export async function interpretApproverReply(
   const { object: interpretation } = await generateObject({
     model: google('gemini-3.1-flash-lite'),
     system: interpreterSystemPrompt(request),
-    // El cuerpo del correo entra por aquí, como mensaje de usuario, y sólo por aquí.
-    prompt: replyText,
+    // El cuerpo del correo entra por aquí, como mensaje de usuario, y sólo por
+    // aquí — y sin la cadena citada, que no es respuesta de nadie.
+    prompt: replyBodyForInterpretation(replyText),
+    // Una decisión que mueve dinero no puede depender del muestreo: el mismo
+    // cuerpo tiene que clasificar igual las dos veces que se lea.
+    temperature: 0,
     schema: interpretationSchema,
   });
 

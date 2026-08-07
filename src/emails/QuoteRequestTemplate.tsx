@@ -12,6 +12,7 @@ import {
 } from 'react-email';
 import * as React from 'react';
 import { usd } from '@/lib/money';
+import { quoteWords, vocabularyFor } from '@/lib/reply-vocabulary';
 
 interface Product {
   partNumber: string;
@@ -76,6 +77,19 @@ export const QuoteRequestTemplate = ({
   const examplePriceLine = `${first?.partNumber ?? 'NÚMERO DE PARTE'}: ${
     first?.suggestedPriceUSD === undefined ? '$PRECIO USD' : usd(first.suggestedPriceUSD)
   }`;
+
+  /**
+   * Las palabras que se le enseñan salen de `reply-vocabulary.ts`, el mismo
+   * sitio del que las lee el prompt del intérprete. Escritas aquí a mano se
+   * separaron de lo que leía la respuesta, y un «Aprobado» dejó de clasificar
+   * (ticket 28). Cambiar una palabra en la tabla la cambia en los dos lados o
+   * rompe la prueba que los compara.
+   */
+  const approved = vocabularyFor('priced_as_suggested');
+  const changed = vocabularyFor('priced_differently');
+  const oem = vocabularyFor('oem_restricted');
+  const discontinued = vocabularyFor('discontinued');
+  const pendingInfo = vocabularyFor('blocked_pending_info');
 
   return (
     <Html>
@@ -198,7 +212,7 @@ export const QuoteRequestTemplate = ({
                 <strong>✅ Si apruebas todos los precios y tiempos sugeridos</strong>
               </Text>
               <Text className="text-gray-700 text-[13px] leading-[20px] m-0">
-                Responde: «Aprobado».
+                {`Responde: ${quoteWords(approved.taught)}.`}
               </Text>
 
               <Text className="text-black text-[13px] leading-[20px] mt-3 mb-0">
@@ -223,8 +237,7 @@ export const QuoteRequestTemplate = ({
                   cambio, y una respuesta que dice las dos cosas se queda en el
                   camino de la aprobación en bloque, donde el plazo se descarta.
                 */}
-                Dilo una vez para toda la solicitud: «Mismos precios, Entrega: 20 semanas». Es un
-                plazo para todas las piezas; el sistema no guarda uno distinto por pieza.
+                {`Dilo una vez para toda la solicitud: ${quoteWords(changed.taught)}. Es un plazo para todas las piezas; el sistema no guarda uno distinto por pieza.`}
               </Text>
 
               {/*
@@ -236,22 +249,21 @@ export const QuoteRequestTemplate = ({
                 <strong>❌ Si es exclusiva del fabricante</strong>
               </Text>
               <Text className="text-gray-700 text-[13px] leading-[20px] m-0">
-                Responde: «OEM» o «No disponible al público». Cierra la solicitud entera, sin
-                cotización.
+                {`Responde: ${quoteWords(oem.taught)}. Cierra la solicitud entera, sin cotización.`}
               </Text>
 
               <Text className="text-black text-[13px] leading-[20px] mt-3 mb-0">
                 <strong>🚫 Si está descontinuada u obsoleta</strong>
               </Text>
               <Text className="text-gray-700 text-[13px] leading-[20px] m-0">
-                Responde: «Descontinuado» u «Obsoleto». Cierra la solicitud entera, sin cotización.
+                {`Responde: ${quoteWords(discontinued.taught)}. Cierra la solicitud entera, sin cotización.`}
               </Text>
 
               <Text className="text-black text-[13px] leading-[20px] mt-3 mb-0">
                 <strong>❓ Si falta información del cliente</strong>
               </Text>
               <Text className="text-gray-700 text-[13px] leading-[20px] m-0">
-                Responde: «Falta info:» y a continuación qué necesitas saber.
+                {`Responde: ${quoteWords(pendingInfo.taught)} y a continuación qué necesitas saber.`}
               </Text>
             </Section>
 
@@ -270,9 +282,11 @@ export const QuoteRequestTemplate = ({
                   esas salidas sabiendo que se llevan la solicitud completa.
                 */}
                 <Text className="text-amber-700 text-[13px] leading-[20px] m-0 mt-1">
-                  Sin un precio tuyo en USD para {unpriceable.length === 1 ? 'ella' : 'ellas'} la
-                  solicitud no puede cotizarse. Si la pieza no se puede vender, responde «OEM» o
-                  «Descontinuado» — eso cierra la solicitud completa, incluidas las demás piezas.
+                  {`Sin un precio tuyo en USD para ${
+                    unpriceable.length === 1 ? 'ella' : 'ellas'
+                  } la solicitud no puede cotizarse. Si la pieza no se puede vender, responde ${quoteWords(
+                    [...oem.taught, ...discontinued.taught]
+                  )} — eso cierra la solicitud completa, incluidas las demás piezas.`}
                 </Text>
               </Section>
             )}

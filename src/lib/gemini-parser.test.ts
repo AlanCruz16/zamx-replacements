@@ -61,6 +61,34 @@ describe('el cuerpo del correo viaja como mensaje de usuario', () => {
     expect(args.system).not.toContain(INYECCION);
   });
 
+  test('la cadena citada no viaja al modelo', async () => {
+    // Sólo es seguro desde que el vocabulario vive en el prompt de sistema: la
+    // cita era lo único que se lo enseñaba al modelo, y quitarla antes habría
+    // empeorado la clasificación en vez de arreglarla.
+    generateObject.mockResolvedValue({
+      object: { classification: 'priced_as_suggested', confidence: 1, explanation: 'Aprobado.' },
+    });
+
+    await interpretApproverReply(
+      REQUEST,
+      ['Aprobado', '', 'El 5 ago 2026 ZIEHL-ABEGG escribió:', `> ${INYECCION}`].join('\n')
+    );
+
+    const [args] = generateObject.mock.calls[0];
+    expect(args.prompt).toBe('Aprobado');
+  });
+
+  test('la llamada no muestrea: la misma respuesta se lee igual las dos veces', async () => {
+    generateObject.mockResolvedValue({
+      object: { classification: 'priced_as_suggested', confidence: 1, explanation: 'Aprobado.' },
+    });
+
+    await interpretApproverReply(REQUEST, 'Aprobado');
+
+    const [args] = generateObject.mock.calls[0];
+    expect(args.temperature).toBe(0);
+  });
+
   test('la interpretación se devuelve tal cual, sin acotar ni traducir', async () => {
     // Acotar la confianza es una regla, y las reglas viven en el veredicto.
     generateObject.mockResolvedValue({

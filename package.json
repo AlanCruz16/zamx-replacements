@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check:vocabulary": "node --env-file=.env.local ./node_modules/.bin/vitest run -c vitest.checks.mts --reporter=verbose",
     "prepare": "husky"
   },
   "dependencies": {
