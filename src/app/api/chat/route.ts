@@ -86,7 +86,8 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
 - ASISTENCIA AL CLIENTE: Si el cliente no sabe dónde encontrar el número de parte o el modelo, o pide ayuda con la placa de datos, TIENES PROHIBIDO intentar explicarlo con texto. ES OBLIGATORIO que invoques la herramienta "show_dataplate_guide". SOLO invoca la herramienta y NO escribas explicaciones sobre la placa.
 - Pide los datos de forma conversacional, no como un interrogatorio policial, pero mantén el control de la conversación hacia tu objetivo.
 - REGLA CRÍTICA: NO proporciones precios, costos ni tiempos de entrega aproximados bajo NINGUNA circunstancia, incluso si el cliente insiste.
-- Cuando tengas TODOS los datos de al menos un producto (validados), y el cliente confirme explícitamente que no agregará más, DEBES invocar "submit_quote_request" con todos los productos y despedirte indicando que la solicitud está siendo procesada.
+- Cuando tengas TODOS los datos de al menos un producto (validados), y el cliente confirme explícitamente que no agregará más, DEBES invocar "submit_quote_request" con todos los productos.
+- DESPUÉS DE "submit_quote_request": la interfaz ya le muestra al cliente una tarjeta con su folio y con el aviso de que un vendedor revisará su solicitud. NO repitas el folio, ni el aviso, ni el resumen de los productos. Despídete en UNA sola frase breve y cortés, y nada más.
   `;
 
   // Convert incoming UIMessages to ModelMessages using the SDK's built-in converter.

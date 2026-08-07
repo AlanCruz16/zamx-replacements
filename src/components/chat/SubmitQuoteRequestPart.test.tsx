@@ -1,7 +1,5 @@
-import { afterEach, describe, expect, test } from 'vitest';
-import * as React from 'react';
-import { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { describe, expect, test } from 'vitest';
+import { haySpinner, montar } from '@/test/render-component';
 import { SubmitQuoteRequestPart } from './SubmitQuoteRequestPart';
 
 /**
@@ -13,35 +11,6 @@ import { SubmitQuoteRequestPart } from './SubmitQuoteRequestPart';
  * entrega — a esta altura ya existe un Suggested Price, que no debe llegarle
  * nunca.
  */
-
-// React 19 exige declarar el entorno de `act` antes de montar nada.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-
-let montado: { root: Root; container: HTMLElement } | null = null;
-
-function montar(elemento: React.ReactElement) {
-  const container = document.createElement('div');
-  document.body.appendChild(container);
-  const root = createRoot(container);
-  act(() => {
-    root.render(elemento);
-  });
-  montado = { root, container };
-  return container;
-}
-
-afterEach(() => {
-  if (!montado) return;
-  const { root, container } = montado;
-  act(() => root.unmount());
-  container.remove();
-  montado = null;
-});
-
-/** El spinner se reconoce por su animación, que es lo que el Customer percibe. */
-function haySpinner(container: HTMLElement) {
-  return container.querySelector('.animate-spin') !== null;
-}
 
 const SALIDA_EXITOSA = {
   success: true,
