@@ -5,7 +5,7 @@ import { api } from '../../convex/_generated/api';
 import Navbar from '@/components/layout/Navbar';
 import { GooeyText } from '@/components/ui/gooey-text-morphing';
 import { DottedSurface } from '@/components/ui/dotted-surface';
-import { BotMessageSquare, Wrench, Clock, Send, User } from 'lucide-react';
+import { BotMessageSquare, Wrench, Clock, Send, User, AlertCircle } from 'lucide-react';
 import { useChat } from '@ai-sdk/react';
 import { DefaultChatTransport } from 'ai';
 import { SubmitQuoteRequestPart } from '@/components/chat/SubmitQuoteRequestPart';
@@ -28,7 +28,7 @@ export default function Dashboard() {
     }
   }, [user, router]);
 
-  const { messages, status, sendMessage } = useChat({
+  const { messages, status, error, sendMessage } = useChat({
     // eslint-disable-next-line react-hooks/refs
     transport: new DefaultChatTransport({
       api: '/api/chat',
@@ -314,6 +314,28 @@ export default function Dashboard() {
               </div>
             )}
             <div ref={messagesEndRef} />
+          </div>
+        )}
+
+        {/*
+          Lo que el servidor contestó cuando no atendió la petición. El
+          transporte del AI SDK pone el cuerpo de la respuesta no-2xx en
+          `error.message`, así que la frase del techo de peticiones —«has
+          enviado demasiados mensajes, vuelve en unos N minutos»— llega hasta
+          aquí tal cual. Sin esto el Customer sólo veía que no pasaba nada.
+        */}
+        {error && (
+          <div
+            role="alert"
+            className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-5 py-3.5 text-[15px] leading-relaxed text-amber-900 dark:text-amber-200"
+          >
+            <AlertCircle size={20} className="shrink-0 mt-0.5" />
+            <p>
+              {error.message ||
+                (isEs
+                  ? 'No pudimos enviar tu mensaje. Vuelve a intentarlo.'
+                  : 'We could not send your message. Please try again.')}
+            </p>
           </div>
         )}
       </main>

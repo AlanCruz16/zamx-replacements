@@ -4,13 +4,33 @@ import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
 import { Resend } from 'resend';
 import { QuoteRequestTemplate } from '@/emails/QuoteRequestTemplate';
-import { createReplacementRequest } from '@/lib/internal-api';
+import { consumeChatRateLimit, createReplacementRequest } from '@/lib/internal-api';
 import { SUPPORT_SENDER } from '@/lib/addresses';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Configura el tiempo máximo de espera para la API (útil en Edge)
 export const maxDuration = 30;
+
+/**
+ * Lo que se le dice al Customer que llamó demasiado deprisa, en su idioma y con
+ * el tiempo que le queda. `DefaultChatTransport` convierte el cuerpo de una
+ * respuesta no-2xx en el `message` del error que recibe `useChat`, así que este
+ * texto es literalmente lo que se pinta en el chat: tiene que ser una frase
+ * para una persona, no un código.
+ */
+function tooManyRequests(retryAfterMs: number, language: string): Response {
+  const minutes = Math.max(1, Math.ceil(retryAfterMs / 60_000));
+  const message =
+    language === 'en'
+      ? `You have sent too many messages. Please try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`
+      : `Has enviado demasiados mensajes. Vuelve a intentarlo en unos ${minutes} minuto${minutes === 1 ? '' : 's'}.`;
+
+  return new Response(message, {
+    status: 429,
+    headers: { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
+  });
+}
 
 export async function POST(req: Request) {
   const { messages, data } = await req.json();
@@ -22,6 +42,29 @@ export async function POST(req: Request) {
     return new Response('Unauthorized', { status: 401 });
   }
   const clerkId = userId;
+
+  // El techo de gasto, antes de cualquier llamada al modelo. La cuenta vive en
+  // Convex y no aquí: esta ruta es una función serverless, y un contador en su
+  // memoria ni sobrevive a la invocación ni se comparte entre instancias.
+  let rateLimit;
+  try {
+    rateLimit = await consumeChatRateLimit(clerkId);
+  } catch (error) {
+    // Si no se puede contar, no se gasta. Fallar abierto convertiría cualquier
+    // tropiezo de Convex en la ausencia del techo, que es justo lo que no puede
+    // pasar sin que nadie se entere.
+    console.error('No se pudo consultar el límite de peticiones del chat:', error);
+    return new Response(
+      language === 'en'
+        ? 'The service is unavailable right now. Please try again in a moment.'
+        : 'El servicio no está disponible en este momento. Vuelve a intentarlo en un momento.',
+      { status: 503 }
+    );
+  }
+
+  if (!rateLimit.allowed) {
+    return tooManyRequests(rateLimit.retryAfterMs, language);
+  }
 
   const systemPrompt = `
 Eres un asistente experto en ventas y cotizaciones de ZIEHL-ABEGG México.
