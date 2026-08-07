@@ -17,6 +17,13 @@ export const outcomeValidator = v.union(
   v.literal('blocked_pending_info')
 );
 
+/**
+ * Las dos clases de fallo del sondeo del buzón, que no se arreglan igual. Se
+ * declara aquí, junto a la tabla que las guarda, para que la función que las
+ * recibe no tenga una copia de la lista que se pueda quedar corta.
+ */
+export const pollerFailureValidator = v.union(v.literal('authentication'), v.literal('connection'));
+
 export default defineSchema({
   users: defineTable({
     clerkId: v.string(),
@@ -99,6 +106,28 @@ export default defineSchema({
     role: v.union(v.literal('user'), v.literal('assistant'), v.literal('system')),
     parts: v.array(v.any()),
   }).index('by_session_id', ['sessionId']),
+
+  /**
+   * Salud del sondeo del buzón (ticket 25). Una sola fila, con lo que hace falta
+   * para saber si el correo entrante está llegando: cuándo fue la última lectura
+   * correcta, cuánto lleva fallando el apagón en curso y si ya se avisó de él.
+   *
+   * Vive en una tabla y no en el módulo porque el proceso de la acción no
+   * sobrevive entre invocaciones: un contador en memoria vuelve a cero cada
+   * cinco minutos, que es justo la cadencia del fallo que tiene que detectar.
+   */
+  poller_health: defineTable({
+    /** Ausente => el buzón nunca se ha leído correctamente. */
+    lastSuccessAt: v.optional(v.number()),
+    /** Ausente => no hay apagón en curso. */
+    outageStartedAt: v.optional(v.number()),
+    outageFailures: v.number(),
+    lastFailure: v.optional(
+      v.object({ kind: pollerFailureValidator, detail: v.string(), at: v.number() })
+    ),
+    /** Presente => ya salió el aviso de este apagón; no se manda otro. */
+    alertedAt: v.optional(v.number()),
+  }),
 
   /**
    * Ventanas de rate limiting (ticket 19). La cuenta vive en Convex, no en la

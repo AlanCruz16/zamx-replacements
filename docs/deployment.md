@@ -76,6 +76,32 @@ Convex-side variables (`APP_URL`, `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECR
 `GOOGLE_GENERATIVE_AI_API_KEY`, `IMAP_*`, `INTERNAL_API_SECRET`, `RESEND_API_KEY`) live on the Convex
 deployment, not on Vercel, and are managed with `npx convex env`.
 
+## When the inbox poller stops working
+
+`IMAP_HOST`, `IMAP_USER` and `IMAP_PASSWORD` are read by `convex/emails.ts`, which is a Convex
+action. **The same variables set on Vercel do nothing** — no Next.js route polls the mailbox — and
+that trap has cost a day of silent downtime once already.
+
+Since ticket 25 the poller no longer fails silently. Every run is recorded in the `poller_health`
+table, and once the mailbox has gone more than twenty minutes (four cron ticks) without a successful
+read, one email goes to `ADMIN_EMAIL` through Resend — a separate credential from IMAP, so the
+notification path survives exactly the failure that breaks the poller. A credential rejection and a
+connection failure say different things, because only the first needs a new Google app password in
+`IMAP_PASSWORD`.
+
+It is one email per outage, and an outage is not over until the poller has gone a full thirty
+minutes without a single failure — the August incident flapped, and a first success ending the
+outage would have meant one email per flap. The alert is sent by a Next.js route
+(`/api/send-poller-alert`), so `ADMIN_EMAIL` and `RESEND_API_KEY` must be set **on Vercel**, and
+`APP_URL` on Convex must point at it. If the email cannot be sent, the "already alerted" mark is
+withdrawn and the next tick tries again rather than swallowing the whole outage.
+
+Three variables unset (`IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` all missing) is still a silent
+no-op, not an alert: that is how preview deployments are kept from polling the shared mailbox.
+
+Replies that arrive during an outage are not lost. A message is marked `\Seen` only once the poller
+has done something with it, so the first healthy run picks up everything that queued up.
+
 ## Building locally
 
 `npm run build` now deploys. Run from a checkout with `CONVEX_DEPLOYMENT` set in `.env.local`, it

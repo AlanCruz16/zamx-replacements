@@ -21,4 +21,5 @@ export const INTERNAL_API_ROUTES = [
   '/api/send-client-quote',
   '/api/send-rejection-email',
   '/api/send-approver-reply',
+  '/api/send-poller-alert',
 ] as const;
