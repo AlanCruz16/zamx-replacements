@@ -76,6 +76,101 @@ Convex-side variables (`APP_URL`, `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECR
 `GOOGLE_GENERATIVE_AI_API_KEY`, `IMAP_*`, `INTERNAL_API_SECRET`, `RESEND_API_KEY`) live on the Convex
 deployment, not on Vercel, and are managed with `npx convex env`.
 
+## Clerk instances
+
+**Production currently authenticates against a Clerk _development_ instance.** The keys in Vercel
+Production are `pk_test_…` / `sk_test_…`, set 41 days ago and never revisited, which is why every
+production request logs `Attention: Clerk collects telemetry data from its SDKs when connected to
+development instances`. Nothing is broken today; what it costs is a development-tier user pool,
+development session and rate limits, telemetry, and the development banner shown to real users.
+Ticket 27.
+
+### It cannot be fixed until there is a custom domain
+
+Clerk will not issue a production instance for `zamx-replacements.vercel.app`. From Clerk's own Vercel
+guide: "you cannot use a `*.vercel.app` domain for production. To deploy to production, you need to
+set DNS records, which isn't possible with vercel.app domains." A production instance is validated by
+a CNAME on a subdomain you control, and nobody controls DNS under `vercel.app`.
+
+So the prerequisite is not a configuration step — it is **owning a domain and pointing it at the
+Vercel project**. Ticket 27 describes the switch as small, and the mechanical half is; it just cannot
+begin until that exists. If the domain sits behind Cloudflare, the Clerk CNAME must be "DNS only",
+because Clerk's validation check fails against a proxied generic hostname.
+
+### What is per-instance, and where it lives
+
+Five values change together, split across two systems that are configured in different places:
+
+| Variable                            | Set on | Read by                             |
+| ----------------------------------- | ------ | ----------------------------------- |
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Vercel | the browser                         |
+| `CLERK_SECRET_KEY`                  | Vercel | Next.js server                      |
+| `CLERK_JWT_ISSUER_DOMAIN`           | Convex | `convex/auth.config.ts`             |
+| `CLERK_WEBHOOK_SECRET`              | Convex | `convex/http.ts:95`                 |
+| The webhook endpoint URL            | Clerk  | points at the Convex `.site` origin |
+
+`NEXT_PUBLIC_CLERK_SIGN_IN_URL` and `NEXT_PUBLIC_CLERK_SIGN_UP_URL` are in-app paths and do not
+change.
+
+Two traps live in that table. **`CLERK_WEBHOOK_SECRET` is also set on Vercel, where it does
+nothing** — the only reader is `convex/http.ts`, a Convex action, exactly like the `IMAP_*` variables
+below. Changing the Vercel copy and stopping there leaves the webhook broken. And
+`convex/auth.config.ts` reads `process.env.CLERK_JWT_ISSUER_DOMAIN || ''`, so a missed or stale
+issuer domain does not throw: `getUserIdentity()` simply returns null and every signed-in Customer
+looks signed out. That is a silent failure, not a loud one.
+
+If the sign-in screen offers any social connection, it needs one more thing. Development instances
+use Clerk's shared OAuth credentials; production instances require your own, registered with each
+provider.
+
+### Switching orphans every existing user
+
+Clerk IDs are per-instance. `users.clerkId` (`convex/schema.ts:29`) is the join between a Clerk
+account and everything in this system, and `users.current` (`convex/users.ts:41`) resolves the signed-in
+Customer by `identity.subject` through the `by_clerk_id` index. After a switch those IDs no longer
+match, so a returning Customer is a new person to the app, with none of their Replacement Requests.
+
+"Clear the rows and let the webhook repopulate" is only half a plan: `convex/http.ts:104` upserts on
+`user.created` and `user.updated` only, and a plain sign-in fires neither. An existing Clerk account
+signing in to the production instance for the first time gets no row until it signs _up_ or edits its
+profile.
+
+Deleting `users` also strands its dependents, because Convex does not cascade. `quotes.userId`,
+`chat_sessions.userId` and `chat_messages.sessionId` are all `v.id(...)` references, so a wipe must go
+in dependency order: `chat_messages`, `chat_sessions`, `quotes`, then `users`.
+
+### Cutover runbook
+
+Written for the case where production holds **only test accounts**, which is what makes the wipe
+acceptable. Confirm that is still true before starting — if any real Customer has Replacement
+Requests worth keeping, stop and remap `users.clerkId` by email instead of deleting.
+
+1. Acquire the domain and add it to the Vercel project. Nothing below is possible first.
+2. In the Clerk dashboard, create the production instance for that domain and add the CNAME records
+   it asks for. Allow up to 48h for propagation; the dashboard shows the domain as verified.
+3. Re-register any social connections against the production instance with your own OAuth
+   credentials.
+4. Create the webhook endpoint on the **production** instance, pointed at
+   `https://colorless-chinchilla-754.convex.site/clerk`, subscribed to `user.created` and
+   `user.updated`. Copy its signing secret.
+5. Set the Convex side first, so the backend is ready before the frontend starts issuing new tokens:
+   `npx convex env set CLERK_JWT_ISSUER_DOMAIN … --prod` and
+   `npx convex env set CLERK_WEBHOOK_SECRET … --prod`.
+6. Wipe the orphaned rows in dependency order (step 5 has already made the old tokens useless, so
+   there is no window where a stale session sees a half-empty database).
+7. Set `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY` on Vercel Production to the
+   `pk_live_…` / `sk_live_…` pair. Remove the dead `CLERK_WEBHOOK_SECRET` from Vercel while you are
+   there.
+8. Redeploy. `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is inlined at build time, so an env change alone
+   does nothing until a build runs.
+9. Update `NEXT_PUBLIC_APP_URL` and Convex's `APP_URL` to the new domain, and the hardcoded
+   `za.idcn.com.mx` sender addresses if the domain change reaches email too (ticket 22).
+
+Verify: the telemetry line is gone from the production logs, a fresh sign-up creates a `users` row
+via the webhook, and that account reaches its own Replacement Requests.
+
+Leave Preview alone. It keeps the development instance, which is what a development instance is for.
+
 ## When the inbox poller stops working
 
 `IMAP_HOST`, `IMAP_USER` and `IMAP_PASSWORD` are read by `convex/emails.ts`, which is a Convex
