@@ -14,30 +14,18 @@ import {
 } from 'react-email';
 
 import type { NotifiableOutcome } from '../../convex/lib/outcome';
+import { messagesFor, type Language } from '@/lib/messages';
 
 /**
- * Qué se le dice al Customer por cada Outcome que no lleva Quote Document.
+ * Qué se le dice al Customer por cada Outcome que no lleva Quote Document vive
+ * en `@/lib/messages`, en los dos idiomas.
  *
- * Son `Record` teclados por el Outcome y no un `switch` con rama por defecto:
- * añadir un Outcome notificable sin redactarlo rompe aquí en el typecheck, en
- * vez de mandarle un encabezado genérico y un cuerpo vacío. Cada mensaje termina
- * en lo que le toca hacer a él —a quién llamar, qué mandarnos—, que es lo único
- * que hace accionable un rechazo.
+ * Siguen siendo `Record` teclados por el Outcome y no un `switch` con rama por
+ * defecto: añadir un Outcome notificable sin redactarlo —en ambos idiomas—
+ * rompe en el typecheck, en vez de mandarle al Customer un encabezado genérico
+ * y un cuerpo vacío. Cada mensaje termina en lo que le toca hacer a él —a quién
+ * llamar, qué mandarnos—, que es lo único que hace accionable un rechazo.
  */
-const REASON_TITLE: Record<NotifiableOutcome, string> = {
-  oem_restricted: 'Información sobre su equipo exclusivo (OEM)',
-  discontinued: 'Aviso de obsolescencia de equipo',
-  blocked_pending_info: 'Requerimos más información para su cotización',
-};
-
-const REASON_MESSAGE: Record<NotifiableOutcome, string> = {
-  oem_restricted:
-    'Después de revisar su solicitud, hemos identificado que el modelo o número de parte solicitado es un diseño exclusivo para el fabricante original del equipo (OEM). Por políticas de distribución, debe contactar directamente al fabricante de su máquina para obtener este reemplazo.',
-  discontinued:
-    'Lamentamos informarle que el equipo que ha solicitado se encuentra obsoleto y ha sido descontinuado de nuestro catálogo.',
-  blocked_pending_info:
-    'Para poder ofrecerle el reemplazo correcto y garantizar la compatibilidad, necesitamos que nos proporcione información adicional, preferentemente una fotografía clara de la placa de datos técnicos del ventilador actual.',
-};
 
 interface RejectedQuoteEmailProps {
   fullName: string;
@@ -53,6 +41,12 @@ interface RejectedQuoteEmailProps {
    * Un correo sin logo se lee; uno con una imagen rota parece una suplantación.
    */
   baseUrl?: string;
+  /**
+   * El idioma del Customer, del registro. Como en el correo del Quote Document:
+   * esto lo renderiza el servidor al enviarlo, así que no hay cabecera de la que
+   * deducirlo.
+   */
+  language: Language;
 }
 
 // Ni `fullName` ni `requestId` llevan valor por defecto: un `REQ-0000` de
@@ -64,9 +58,12 @@ export const RejectedQuoteEmail = ({
   outcome,
   explanation = '',
   baseUrl,
+  language,
 }: RejectedQuoteEmailProps) => {
+  const t = messagesFor(language).rejectedQuoteEmail;
+
   return (
-    <Html>
+    <Html lang={language}>
       <Head />
       <Tailwind>
         <Body className="bg-[#f6f9fc] font-sans">
@@ -76,30 +73,31 @@ export const RejectedQuoteEmail = ({
                 <Img
                   src={`${baseUrl}/logo_final.png`}
                   width="160"
-                  alt="ZIEHL-ABEGG"
+                  alt={t.logoAlt}
                   className="mx-auto"
                 />
               </Section>
             )}
 
             <Heading className="text-[#00519E] text-2xl font-bold mb-4">
-              {REASON_TITLE[outcome]}
+              {t.reasonTitle[outcome]}
             </Heading>
 
             <Text className="text-gray-700 text-base leading-relaxed">
-              Estimado/a <strong>{fullName}</strong>,
+              {t.greeting} <strong>{fullName}</strong>,
             </Text>
 
             <Text className="text-gray-700 text-base leading-relaxed">
-              En relación a su solicitud de cotización con folio <strong>{requestId}</strong>, le
-              compartimos la siguiente información:
+              {t.introBefore}
+              <strong>{requestId}</strong>
+              {t.introAfter}
             </Text>
 
             <Section className="bg-gray-50 border-l-4 border-[#00519E] p-4 my-6">
-              <Text className="text-gray-800 text-base m-0">{REASON_MESSAGE[outcome]}</Text>
+              <Text className="text-gray-800 text-base m-0">{t.reasonMessage[outcome]}</Text>
               {explanation && (
                 <Text className="text-gray-700 text-sm mt-4 italic">
-                  <strong>Nota adicional de nuestro equipo:</strong> &quot;{explanation}&quot;
+                  <strong>{t.additionalNote}</strong> &quot;{explanation}&quot;
                 </Text>
               )}
             </Section>
@@ -110,22 +108,19 @@ export const RejectedQuoteEmail = ({
                   href={baseUrl}
                   className="bg-[#00519E] text-white px-6 py-3 rounded-md font-semibold text-sm no-underline"
                 >
-                  Regresar a la plataforma
+                  {t.backToPlatform}
                 </Link>
               </Section>
             )}
 
-            <Text className="text-gray-700 text-base leading-relaxed">
-              Si tiene alguna duda o requiere asistencia técnica adicional, no dude en responder a
-              este correo.
-            </Text>
+            <Text className="text-gray-700 text-base leading-relaxed">{t.replyInvitation}</Text>
 
             <Hr className="border-gray-200 my-8" />
 
             <Text className="text-gray-500 text-sm text-center">
-              Este es un correo automático generado por ZIEHL-ABEGG México.
+              {t.automatedFooter}
               <br />
-              4971 Millennium Drive, Winston-Salem NC 27107
+              {t.postalAddress}
             </Text>
           </Container>
         </Body>

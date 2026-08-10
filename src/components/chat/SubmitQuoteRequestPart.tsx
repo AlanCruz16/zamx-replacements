@@ -1,4 +1,5 @@
 import { CheckCircle2, Loader2, TriangleAlert } from 'lucide-react';
+import { messagesFor, type Language } from '@/lib/messages';
 
 /**
  * Los estados por los que pasa una tool part del AI SDK v6 (ver
@@ -32,7 +33,7 @@ type Props = {
   /** Puede llegar indefinido si la part no trae estado; ver más abajo. */
   state?: ToolPartState;
   output?: SubmitQuoteRequestOutput;
-  isEs: boolean;
+  language: Language;
 };
 
 /**
@@ -50,15 +51,15 @@ type Props = {
  * La confirmación nombra el folio `REQ-` y nada más: a esta altura ya existe un
  * Suggested Price, y ni él ni la entrega pueden llegarle al Customer.
  */
-export function SubmitQuoteRequestPart({ state, output, isEs }: Props) {
+export function SubmitQuoteRequestPart({ state, output, language }: Props) {
+  const t = messagesFor(language).chat;
+
   if (state && SIN_SALIDA_TODAVIA.includes(state)) {
     return (
       <div className="flex flex-col gap-3 mt-3">
         <div className="flex items-center gap-2 text-[var(--color-brand-light)] font-semibold pb-2">
           <Loader2 className="animate-spin" size={16} />
-          {isEs
-            ? 'Enviando tu solicitud de reemplazo...'
-            : 'Submitting your replacement request...'}
+          {t.submitting}
         </div>
       </div>
     );
@@ -69,13 +70,9 @@ export function SubmitQuoteRequestPart({ state, output, isEs }: Props) {
       <div className="flex flex-col gap-2 mt-3 p-3 rounded-xl border border-red-200 dark:border-red-900/50 bg-red-50/60 dark:bg-red-950/20">
         <div className="flex items-center gap-2 text-red-700 dark:text-red-400 font-semibold">
           <TriangleAlert size={16} />
-          {isEs ? 'Tu solicitud no se envió' : 'Your replacement request was not submitted'}
+          {t.submitFailedTitle}
         </div>
-        <p className="text-sm text-red-700/90 dark:text-red-300/90">
-          {isEs
-            ? 'No pudimos registrarla. Por favor intenta de nuevo.'
-            : 'We could not record it. Please try again.'}
-        </p>
+        <p className="text-sm text-red-700/90 dark:text-red-300/90">{t.submitFailedBody}</p>
       </div>
     );
   }
@@ -91,19 +88,17 @@ export function SubmitQuoteRequestPart({ state, output, isEs }: Props) {
       <div className="flex flex-col gap-2 mt-3 p-3 rounded-xl border border-[var(--color-brand-blue)]/20 bg-white/50 dark:bg-black/20">
         <div className="flex items-center gap-2 text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)] font-semibold">
           <CheckCircle2 size={16} />
-          {isEs ? 'Solicitud enviada' : 'Request submitted'}
+          {t.submittedTitle}
         </div>
         <p className="text-sm text-gray-700 dark:text-gray-300">
           {requestId && (
             <>
-              {isEs ? 'Tu folio es ' : 'Your reference number is '}
+              {t.submittedReference}
               <span className="font-bold">{requestId}</span>
               {'. '}
             </>
           )}
-          {isEs
-            ? 'Un vendedor la revisará y se pondrá en contacto contigo.'
-            : 'A salesperson will review it and get back to you.'}
+          {t.submittedFollowUp}
         </p>
       </div>
     );

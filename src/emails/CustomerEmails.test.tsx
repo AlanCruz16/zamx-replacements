@@ -3,6 +3,8 @@ import * as React from 'react';
 import { renderEmail } from '@/test/render-email';
 import { ClientQuoteEmail } from './ClientQuoteEmail';
 import { RejectedQuoteEmail } from './RejectedQuoteEmail';
+import { LANGUAGES, messagesFor, type Language } from '@/lib/messages';
+import { otherLanguage } from '@/test/languages';
 import { NOTIFIABLE_OUTCOMES, type NotifiableOutcome } from '../../convex/lib/outcome';
 
 /**
@@ -10,10 +12,11 @@ import { NOTIFIABLE_OUTCOMES, type NotifiableOutcome } from '../../convex/lib/ou
  *
  * Son lo primero que le llega con la marca de la empresa después de que su
  * Replacement Request se decide, así que lo que se afirma es lo que él lee: que
- * no le llega sintaxis de Markdown en crudo, y que el código `REQ-XXXXXX`
- * aparece una sola vez y en su forma canónica. El glosario da un identificador
- * por Replacement Request; un `ZAMX-Q-REQ-A7F3K2` inventa un segundo esquema y
- * luego lo concatena con el primero.
+ * no le llega sintaxis de Markdown en crudo, que el código `REQ-XXXXXX` aparece
+ * una sola vez y en su forma canónica, y que llega entero en el idioma que
+ * eligió. El glosario da un identificador por Replacement Request; un
+ * `ZAMX-Q-REQ-A7F3K2` inventa un segundo esquema y luego lo concatena con el
+ * primero.
  */
 
 const REQUEST_ID = 'REQ-A7F3K2';
@@ -30,7 +33,11 @@ const OUTCOMES = NOTIFIABLE_OUTCOMES;
 describe('el correo con el Quote Document', () => {
   test('no le manda al Customer los asteriscos de Markdown', async () => {
     const { html, text } = await renderEmail(
-      React.createElement(ClientQuoteEmail, { fullName: 'Ana Márquez', requestId: REQUEST_ID })
+      React.createElement(ClientQuoteEmail, {
+        fullName: 'Ana Márquez',
+        requestId: REQUEST_ID,
+        language: 'es',
+      })
     );
 
     expect(text).not.toContain('**');
@@ -39,7 +46,11 @@ describe('el correo con el Quote Document', () => {
 
   test('nombra la Replacement Request por su código, una sola vez en el cuerpo', async () => {
     const { text } = await renderEmail(
-      React.createElement(ClientQuoteEmail, { fullName: 'Ana Márquez', requestId: REQUEST_ID })
+      React.createElement(ClientQuoteEmail, {
+        fullName: 'Ana Márquez',
+        requestId: REQUEST_ID,
+        language: 'es',
+      })
     );
 
     expect(occurrences(text, REQUEST_ID)).toBe(1);
@@ -49,11 +60,56 @@ describe('el correo con el Quote Document', () => {
 
   test('le dice al Customer con quién hablar y a qué hacer referencia', async () => {
     const { text } = await renderEmail(
-      React.createElement(ClientQuoteEmail, { fullName: 'Ana Márquez', requestId: REQUEST_ID })
+      React.createElement(ClientQuoteEmail, {
+        fullName: 'Ana Márquez',
+        requestId: REQUEST_ID,
+        language: 'es',
+      })
     );
 
     expect(text).toContain('Ana Márquez');
     expect(text).toMatch(/PDF/);
+  });
+
+  /**
+   * El fallo del ticket 20 en su forma más cara: el Customer que había elegido
+   * inglés recibía respuestas en inglés en el chat y después este correo en
+   * español, con un PDF en español adjunto. Lo que se afirma no es que estén
+   * las frases del idioma pedido —eso ya lo cubre el módulo de mensajes— sino
+   * que **ninguna** frase del otro idioma sobrevive.
+   */
+  test.each(LANGUAGES)('en %s no sobrevive ninguna frase del otro idioma', async (language) => {
+    const { text } = await renderEmail(
+      React.createElement(ClientQuoteEmail, {
+        fullName: 'Ana Márquez',
+        requestId: REQUEST_ID,
+        language,
+      })
+    );
+
+    const mine = messagesFor(language).clientQuoteEmail;
+    const theirs = messagesFor(otherLanguage(language)).clientQuoteEmail;
+
+    expect(text).toContain(mine.heading);
+    expect(text).toContain(mine.contents);
+    expect(text).toContain(mine.team);
+
+    expect(text).not.toContain(theirs.heading);
+    expect(text).not.toContain(theirs.contents);
+    expect(text).not.toContain(theirs.team);
+    expect(text).not.toContain(theirs.howToOrder);
+  });
+
+  test.each(LANGUAGES)('el correo en %s se declara en su idioma', async (language) => {
+    const { html } = await renderEmail(
+      React.createElement(ClientQuoteEmail, {
+        fullName: 'Ana Márquez',
+        requestId: REQUEST_ID,
+        language,
+      })
+    );
+
+    expect(html).toContain(`lang="${language}"`);
   });
 });
 
@@ -66,6 +122,7 @@ describe('el correo de un Outcome sin Quote Document', () => {
           fullName: 'Ana Márquez',
           requestId: REQUEST_ID,
           outcome,
+          language: 'es',
         })
       );
 
@@ -85,6 +142,53 @@ describe('el correo de un Outcome sin Quote Document', () => {
     }
   );
 
+  /**
+   * Un rechazo es justo el correo donde peor sienta el idioma equivocado: es el
+   * que le dice al Customer qué le pasó a su solicitud y qué hacer ahora.
+   */
+  test.each(OUTCOMES)('el Outcome %s se le dice en inglés y sólo en inglés', async (outcome) => {
+    const { text } = await renderEmail(
+      React.createElement(RejectedQuoteEmail, {
+        fullName: 'Ana Márquez',
+        requestId: REQUEST_ID,
+        outcome,
+        language: 'en',
+      })
+    );
+
+    const mine = messagesFor('en').rejectedQuoteEmail;
+    const theirs = messagesFor('es').rejectedQuoteEmail;
+
+    expect(text).toContain(mine.reasonTitle[outcome]);
+    expect(text).toContain(mine.reasonMessage[outcome]);
+    expect(text).toContain(mine.replyInvitation);
+
+    expect(text).not.toContain(theirs.reasonTitle[outcome]);
+    expect(text).not.toContain(theirs.reasonMessage[outcome]);
+    expect(text).not.toContain(theirs.replyInvitation);
+    expect(text).not.toContain(theirs.automatedFooter);
+  });
+
+  test.each(LANGUAGES)(
+    'el enlace de vuelta a la plataforma va en %s',
+    async (language: Language) => {
+      const { text } = await renderEmail(
+        React.createElement(RejectedQuoteEmail, {
+          fullName: 'Ana Márquez',
+          requestId: REQUEST_ID,
+          outcome: 'blocked_pending_info',
+          baseUrl: 'https://zamx.example.com',
+          language,
+        })
+      );
+
+      expect(text).toContain(messagesFor(language).rejectedQuoteEmail.backToPlatform);
+      expect(text).not.toContain(
+        messagesFor(otherLanguage(language)).rejectedQuoteEmail.backToPlatform
+      );
+    }
+  );
+
   test('sin URL público configurado sale sin logo roto ni enlace a localhost', async () => {
     // El mismo fallo que el ticket 17 le quitó al Quote Document: el logo
     // colgaba de `NEXT_PUBLIC_APP_URL`, que sin configurar cae a
@@ -95,6 +199,7 @@ describe('el correo de un Outcome sin Quote Document', () => {
         fullName: 'Ana Márquez',
         requestId: REQUEST_ID,
         outcome: 'blocked_pending_info',
+        language: 'es',
       })
     );
 
@@ -109,6 +214,7 @@ describe('el correo de un Outcome sin Quote Document', () => {
         requestId: REQUEST_ID,
         outcome: 'blocked_pending_info',
         baseUrl: 'https://zamx.example.com',
+        language: 'es',
       })
     );
 
@@ -123,6 +229,7 @@ describe('el correo de un Outcome sin Quote Document', () => {
         requestId: REQUEST_ID,
         outcome: 'discontinued',
         explanation: 'El sustituto es el FN050; pídalo por separado.',
+        language: 'es',
       })
     );
 
@@ -135,6 +242,7 @@ describe('el correo de un Outcome sin Quote Document', () => {
         fullName: 'Ana Márquez',
         requestId: REQUEST_ID,
         outcome: 'oem_restricted',
+        language: 'es',
       })
     );
 

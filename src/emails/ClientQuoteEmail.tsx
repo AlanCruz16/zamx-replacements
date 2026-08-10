@@ -1,46 +1,53 @@
 import { Body, Container, Head, Heading, Html, Preview, Text } from 'react-email';
 import * as React from 'react';
+import { messagesFor, type Language } from '@/lib/messages';
 
 interface ClientQuoteEmailProps {
   fullName: string;
   requestId: string;
+  /**
+   * El idioma del Customer, del registro. Llega como prop porque el correo lo
+   * renderiza el servidor al enviarlo: no hay navegador ni cabecera a la que
+   * preguntarle. Hasta el ticket 20 este correo salía siempre en español, así
+   * que el Customer que había elegido inglés recibía respuestas en inglés en el
+   * chat y luego esto.
+   */
+  language: Language;
 }
 
-export const ClientQuoteEmail = ({ fullName, requestId }: ClientQuoteEmailProps) => (
-  <Html>
-    <Head />
-    <Preview>Su cotización oficial de ZIEHL-ABEGG México ({requestId})</Preview>
-    <Body style={main}>
-      <Container style={container}>
-        <Heading style={h1}>Cotización ZIEHL-ABEGG</Heading>
+export const ClientQuoteEmail = ({ fullName, requestId, language }: ClientQuoteEmailProps) => {
+  const t = messagesFor(language).clientQuoteEmail;
 
-        <Text style={text}>Estimado/a {fullName},</Text>
+  return (
+    <Html lang={language}>
+      <Head />
+      <Preview>{t.preview(requestId)}</Preview>
+      <Body style={main}>
+        <Container style={container}>
+          <Heading style={h1}>{t.heading}</Heading>
 
-        <Text style={text}>
-          Agradecemos su interés en nuestros productos. Adjunto a este correo encontrará la
-          cotización oficial <strong>{requestId}</strong> correspondiente a su solicitud de piezas
-          de reemplazo.
-        </Text>
+          <Text style={text}>{t.greeting(fullName)}</Text>
 
-        <Text style={text}>
-          El documento en formato PDF adjunto contiene el detalle de precios, tiempos de entrega y
-          condiciones comerciales.
-        </Text>
+          <Text style={text}>
+            {t.attachedBefore}
+            <strong>{requestId}</strong>
+            {t.attachedAfter}
+          </Text>
 
-        <Text style={text}>
-          Si tiene alguna duda o desea proceder con la orden de compra, use el correo proporcionado
-          al final del documento PDF haciendo referencia al número de cotización.
-        </Text>
+          <Text style={text}>{t.contents}</Text>
 
-        <Text style={text}>
-          Atentamente,
-          <br />
-          El equipo de Ventas ZIEHL-ABEGG México
-        </Text>
-      </Container>
-    </Body>
-  </Html>
-);
+          <Text style={text}>{t.howToOrder}</Text>
+
+          <Text style={text}>
+            {t.closing}
+            <br />
+            {t.team}
+          </Text>
+        </Container>
+      </Body>
+    </Html>
+  );
+};
 
 export default ClientQuoteEmail;
 

@@ -5,6 +5,7 @@ import { toolNameOfPart } from '../../../convex/lib/chat';
 import { SubmitQuoteRequestPart } from './SubmitQuoteRequestPart';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { DataplateGuidePart } from './DataplateGuidePart';
+import type { Language } from '@/lib/messages';
 
 /**
  * Qué se pinta por cada part de un mensaje.
@@ -16,14 +17,14 @@ import { DataplateGuidePart } from './DataplateGuidePart';
 export function MessagePart({
   part,
   role,
-  isEs,
+  language,
 }: {
   // El AI SDK v6 no exporta un tipo cerrado para las parts de herramienta con
   // salida propia; se estrecha aquí abajo por `type`.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   part: any;
   role: UIMessage['role'];
-  isEs: boolean;
+  language: Language;
 }) {
   if (part.type === 'text') {
     // Sólo lo que escribe el modelo se interpreta como Markdown. Lo que escribe
@@ -46,11 +47,11 @@ export function MessagePart({
 
   if (toolName !== undefined) {
     if (toolName === 'show_dataplate_guide') {
-      return <DataplateGuidePart isEs={isEs} />;
+      return <DataplateGuidePart language={language} />;
     }
 
     if (toolName === 'submit_quote_request') {
-      return <SubmitQuoteRequestPart state={part.state} output={part.output} isEs={isEs} />;
+      return <SubmitQuoteRequestPart state={part.state} output={part.output} language={language} />;
     }
 
     // Una herramienta que no reconocemos no es asunto del Customer: no se pinta

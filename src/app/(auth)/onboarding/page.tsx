@@ -5,6 +5,7 @@ import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../../convex/_generated/api';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
+import { messagesFor, resolveLanguage } from '@/lib/messages';
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -15,6 +16,12 @@ export default function OnboardingPage() {
   const [companyName, setCompanyName] = useState('');
   const [phone, setPhone] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // El alta es la primera pantalla del Customer, y hasta el ticket 20 era la
+  // única que no miraba su idioma. Quien llega con la cuenta ya en inglés
+  // rellenaba un formulario en español antes de ver el chat.
+  const language = resolveLanguage(user?.preferredLanguage);
+  const t = messagesFor(language).onboarding;
 
   // Pre-fill full name if available
   useEffect(() => {
@@ -66,19 +73,14 @@ export default function OnboardingPage() {
   return (
     <div className="bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl rounded-2xl w-full p-8 md:p-10">
       <div className="mb-8 text-center">
-        <h1 className="text-white text-2xl font-bold mb-2">
-          Bienvenido a la aplicación de remplazos
-        </h1>
-        <p className="text-white/70 text-sm">
-          Por favor, completa tu información para configurar tu cuenta y personalizar tus
-          cotizaciones.
-        </p>
+        <h1 className="text-white text-2xl font-bold mb-2">{t.title}</h1>
+        <p className="text-white/70 text-sm">{t.subtitle}</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="space-y-1">
           <label htmlFor="fullName" className="text-white/90 text-sm font-medium">
-            Nombre Completo <span className="text-red-400">*</span>
+            {t.fullNameLabel} <span className="text-red-400">*</span>
           </label>
           <input
             id="fullName"
@@ -87,13 +89,13 @@ export default function OnboardingPage() {
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-white/40 focus:outline-none focus:border-brand-light focus:ring-1 focus:ring-brand-light transition-all"
-            placeholder="Ej. Juan Pérez"
+            placeholder={t.fullNamePlaceholder}
           />
         </div>
 
         <div className="space-y-1">
           <label htmlFor="companyName" className="text-white/90 text-sm font-medium">
-            Empresa <span className="text-red-400">*</span>
+            {t.companyLabel} <span className="text-red-400">*</span>
           </label>
           <input
             id="companyName"
@@ -102,13 +104,14 @@ export default function OnboardingPage() {
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
             className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-white/40 focus:outline-none focus:border-brand-light focus:ring-1 focus:ring-brand-light transition-all"
-            placeholder="Nombre de tu compañía"
+            placeholder={t.companyPlaceholder}
           />
         </div>
 
         <div className="space-y-1">
           <label htmlFor="phone" className="text-white/90 text-sm font-medium">
-            Teléfono <span className="text-white/50 text-xs font-normal">(Opcional)</span>
+            {t.phoneLabel}{' '}
+            <span className="text-white/50 text-xs font-normal">{t.phoneOptional}</span>
           </label>
           <input
             id="phone"
@@ -116,7 +119,7 @@ export default function OnboardingPage() {
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-white/40 focus:outline-none focus:border-brand-light focus:ring-1 focus:ring-brand-light transition-all"
-            placeholder="Ej. +52 55 1234 5678"
+            placeholder={t.phonePlaceholder}
           />
         </div>
 
@@ -125,7 +128,7 @@ export default function OnboardingPage() {
           disabled={isSubmitting || !fullName.trim() || !companyName.trim()}
           className="w-full bg-[#004b87] hover:bg-[#0066b3] text-white font-medium py-2.5 rounded-lg border-none shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center mt-4"
         >
-          {isSubmitting ? <Loader2 className="animate-spin w-5 h-5" /> : 'Guardar y Continuar'}
+          {isSubmitting ? <Loader2 className="animate-spin w-5 h-5" /> : t.submit}
         </button>
       </form>
     </div>

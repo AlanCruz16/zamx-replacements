@@ -21,6 +21,7 @@ import { DefaultChatTransport, type UIMessage } from 'ai';
 import { MessagePart } from '@/components/chat/MessagePart';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { messagesFor, resolveLanguage } from '@/lib/messages';
 
 /** Lo que se pinta mientras Convex contesta quién es el Customer y qué decía. */
 function Loading() {
@@ -135,7 +136,12 @@ function ChatDashboard({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const isEs = user.preferredLanguage === 'es';
+  // Toda la copia de la pantalla sale del mismo módulo y del mismo idioma que
+  // el chatbot, el Quote Document y los correos (ticket 20). Antes cada frase
+  // llevaba su propio condicional incrustado en el JSX, así que traducir la
+  // pantalla era acordarse de cada uno.
+  const language = resolveLanguage(user.preferredLanguage);
+  const t = messagesFor(language).chat;
 
   /**
    * La conversación ya produjo su Replacement Request, así que no admite más
@@ -166,7 +172,7 @@ function ChatDashboard({
               style={{ animation: 'fadeIn 0.6s ease-out forwards' }}
             >
               <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-white mb-2">
-                {isEs ? 'Hola,' : 'Hello,'}{' '}
+                {t.greeting}{' '}
                 <span className="text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]">
                   {user.fullName.split(' ')[0]}
                 </span>
@@ -174,15 +180,11 @@ function ChatDashboard({
 
               <div className="flex flex-col items-center justify-center pt-2">
                 <p className="text-xl md:text-2xl text-gray-600 dark:text-gray-300 font-medium">
-                  {isEs ? 'Cotiza aquí tu' : 'Quote here your'}
+                  {t.quoteHere}
                 </p>
                 <div className="h-[80px] md:h-[100px] flex items-center justify-center w-full -mt-2">
                   <GooeyText
-                    texts={
-                      isEs
-                        ? ['ventilador', 'reemplazo', 'refacción', 'equipo']
-                        : ['fan', 'replacement', 'spare part', 'equipment']
-                    }
+                    texts={t.morphingWords}
                     morphTime={1}
                     cooldownTime={0.6}
                     className="font-bold w-full"
@@ -198,44 +200,26 @@ function ChatDashboard({
               style={{ animation: 'fadeIn 0.6s ease-out 0.2s forwards' }}
             >
               <button
-                onClick={() =>
-                  append(
-                    isEs
-                      ? 'Quiero cotizar un ventilador de reemplazo.'
-                      : 'I want to quote a replacement fan.'
-                  )
-                }
+                onClick={() => append(t.quoteReplacementPrompt)}
                 className="flex flex-col items-start p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-[#111111]/50 backdrop-blur-sm hover:border-[var(--color-brand-blue)]/50 hover:shadow-lg transition-all duration-300 text-left group"
               >
                 <Wrench className="text-gray-400 group-hover:text-[var(--color-brand-blue)] mb-3 transition-colors" />
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                  {isEs ? 'Cotizar un reemplazo' : 'Quote a replacement'}
+                  {t.quoteReplacementTitle}
                 </h3>
                 <p className="text-sm text-gray-500 mt-1 leading-relaxed">
-                  {isEs
-                    ? 'Inicia el flujo para cotizar uno o varios equipos.'
-                    : 'Start the flow to quote one or more items.'}
+                  {t.quoteReplacementBody}
                 </p>
               </button>
               <button
-                onClick={() =>
-                  append(
-                    isEs
-                      ? 'No encuentro mi número de parte, ¿cómo lo busco?'
-                      : "I can't find my part number, where is it?"
-                  )
-                }
+                onClick={() => append(t.dataplateHelpPrompt)}
                 className="flex flex-col items-start p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-[#111111]/50 backdrop-blur-sm hover:border-[var(--color-brand-blue)]/50 hover:shadow-lg transition-all duration-300 text-left group"
               >
                 <Clock className="text-gray-400 group-hover:text-[var(--color-brand-blue)] mb-3 transition-colors" />
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                  {isEs ? 'Ayuda con la placa de datos' : 'Help with data plate'}
+                  {t.dataplateHelpTitle}
                 </h3>
-                <p className="text-sm text-gray-500 mt-1 leading-relaxed">
-                  {isEs
-                    ? 'Descubre dónde localizar el modelo y número de parte.'
-                    : 'Find out where to locate the model and part number.'}
-                </p>
+                <p className="text-sm text-gray-500 mt-1 leading-relaxed">{t.dataplateHelpBody}</p>
               </button>
             </div>
           </div>
@@ -264,7 +248,7 @@ function ChatDashboard({
                   {/* Handling message parts */}
                   {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
                   {m.parts.map((part: any, index: number) => (
-                    <MessagePart key={index} part={part} role={m.role} isEs={isEs} />
+                    <MessagePart key={index} part={part} role={m.role} language={language} />
                   ))}
                 </div>
 
@@ -315,12 +299,7 @@ function ChatDashboard({
             className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-5 py-3.5 text-[15px] leading-relaxed text-amber-900 dark:text-amber-200"
           >
             <AlertCircle size={20} className="shrink-0 mt-0.5" />
-            <p>
-              {error.message ||
-                (isEs
-                  ? 'No pudimos enviar tu mensaje. Vuelve a intentarlo.'
-                  : 'We could not send your message. Please try again.')}
-            </p>
+            <p>{error.message || t.genericError}</p>
           </div>
         )}
       </main>
@@ -340,7 +319,7 @@ function ChatDashboard({
               className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-3xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-[#111111]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] text-[16px] md:text-lg font-medium text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)] hover:border-[var(--color-brand-blue)]/50 transition-all"
             >
               <MessageSquarePlus size={20} />
-              {isEs ? 'Empezar una conversación nueva' : 'Start a new conversation'}
+              {t.startNewConversation}
             </button>
           ) : (
             <form onSubmit={handleSubmit} className="relative flex items-center group">
@@ -348,11 +327,7 @@ function ChatDashboard({
                 type="text"
                 value={inputValue}
                 onChange={handleInputChange}
-                placeholder={
-                  isEs
-                    ? 'Escribe un mensaje, modelo o número de parte...'
-                    : 'Type a message, model, or part number...'
-                }
+                placeholder={t.inputPlaceholder}
                 className="w-full pl-6 pr-16 py-4 rounded-3xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-[#111111]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-blue)]/50 focus:border-transparent text-gray-900 dark:text-gray-100 transition-all text-[16px] md:text-lg disabled:opacity-50"
                 disabled={isLoading}
               />
@@ -368,7 +343,7 @@ function ChatDashboard({
             </form>
           )}
           <p className="text-center text-xs text-gray-400 mt-4 font-medium tracking-wide">
-            &copy; 2026 ZAMX Replacements. Todos los derechos reservados.
+            {t.copyright}
           </p>
         </div>
       </div>

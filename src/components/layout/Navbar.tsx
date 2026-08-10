@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { FileText, Globe, Home } from 'lucide-react';
 import { ExpandableTabs, TabItem } from '@/components/ui/expandable-tabs';
 import QuotesModal from './QuotesModal';
+import { messagesFor, resolveLanguage } from '@/lib/messages';
 
 export default function Navbar() {
   const user = useQuery(api.users.current);
@@ -19,12 +20,20 @@ export default function Navbar() {
     updateLanguage({ language: newLang });
   };
 
+  // Mientras Convex no ha contestado quién es el Customer no hay barra que
+  // pintar, así que el idioma por defecto sirve para armar los tabs sin que se
+  // llegue a ver ninguno en el idioma equivocado.
+  const language = resolveLanguage(user?.preferredLanguage);
+  const t = messagesFor(language).nav;
+
   const tabs: TabItem[] = [
-    { title: 'Inicio', icon: Home },
+    { title: t.home, icon: Home },
     { type: 'separator' },
-    { title: user?.preferredLanguage === 'es' ? 'ES / en' : 'es / EN', icon: Globe },
+    // La etiqueta pone en mayúscula el idioma activo: el control dice a la vez
+    // dónde estás y a dónde te lleva.
+    { title: t.languageToggle, icon: Globe },
     { type: 'separator' },
-    { title: 'Mis Cotizaciones', icon: FileText },
+    { title: t.quotes, icon: FileText },
   ];
 
   const handleTabChange = (index: number | null) => {
@@ -43,8 +52,8 @@ export default function Navbar() {
         <div className="mx-auto max-w-5xl px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/favicon.svg" alt="ZIEHL-ABEGG Logo" className="w-8 h-8 object-contain" />
-            <span className="text-4xl leading-none ml-1" title="México">
+            <img src="/favicon.svg" alt={t.logoAlt} className="w-8 h-8 object-contain" />
+            <span className="text-4xl leading-none ml-1" title={t.countryTitle}>
               🇲🇽
             </span>
           </div>

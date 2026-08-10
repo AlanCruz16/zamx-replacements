@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { haySpinner, montar } from '@/test/render-component';
 import { SubmitQuoteRequestPart } from './SubmitQuoteRequestPart';
+import { LANGUAGES } from '@/lib/messages';
 
 /**
  * Lo que el Customer ve mientras se envía su Replacement Request, y después.
@@ -27,7 +28,7 @@ describe('SubmitQuoteRequestPart', () => {
       'approval-responded',
     ] as const) {
       test(`${state} gira y dice que se está enviando`, () => {
-        const container = montar(<SubmitQuoteRequestPart state={state} isEs={true} />);
+        const container = montar(<SubmitQuoteRequestPart state={state} language="es" />);
 
         expect(haySpinner(container)).toBe(true);
         expect(container.textContent).toMatch(/enviando/i);
@@ -38,7 +39,7 @@ describe('SubmitQuoteRequestPart', () => {
   describe('cuando la herramienta termina bien', () => {
     test('detiene el spinner', () => {
       const container = montar(
-        <SubmitQuoteRequestPart state="output-available" output={SALIDA_EXITOSA} isEs={true} />
+        <SubmitQuoteRequestPart state="output-available" output={SALIDA_EXITOSA} language="es" />
       );
 
       expect(haySpinner(container)).toBe(false);
@@ -46,7 +47,7 @@ describe('SubmitQuoteRequestPart', () => {
 
     test('nombra el folio y dice que un vendedor lo revisará', () => {
       const container = montar(
-        <SubmitQuoteRequestPart state="output-available" output={SALIDA_EXITOSA} isEs={true} />
+        <SubmitQuoteRequestPart state="output-available" output={SALIDA_EXITOSA} language="es" />
       );
 
       expect(container.textContent).toContain('REQ-4B7K2Z');
@@ -55,7 +56,7 @@ describe('SubmitQuoteRequestPart', () => {
 
     test('en inglés también nombra el folio y a quien la revisará', () => {
       const container = montar(
-        <SubmitQuoteRequestPart state="output-available" output={SALIDA_EXITOSA} isEs={false} />
+        <SubmitQuoteRequestPart state="output-available" output={SALIDA_EXITOSA} language="en" />
       );
 
       expect(container.textContent).toContain('REQ-4B7K2Z');
@@ -64,10 +65,14 @@ describe('SubmitQuoteRequestPart', () => {
 
     // Ni el Suggested Price ni la entrega pueden asomarse en la confirmación,
     // por mucho que ambos existan ya cuando ésta se pinta (ticket 07).
-    for (const isEs of [true, false]) {
-      test(`no menciona precio ni entrega (isEs=${isEs})`, () => {
+    for (const language of LANGUAGES) {
+      test(`no menciona precio ni entrega (${language})`, () => {
         const container = montar(
-          <SubmitQuoteRequestPart state="output-available" output={SALIDA_EXITOSA} isEs={isEs} />
+          <SubmitQuoteRequestPart
+            state="output-available"
+            output={SALIDA_EXITOSA}
+            language={language}
+          />
         );
 
         expect(container.textContent).not.toMatch(
@@ -84,7 +89,7 @@ describe('SubmitQuoteRequestPart', () => {
         <SubmitQuoteRequestPart
           state="output-available"
           output={{ success: true, message: 'ok' }}
-          isEs={true}
+          language="es"
         />
       );
 
@@ -100,7 +105,7 @@ describe('SubmitQuoteRequestPart', () => {
         <SubmitQuoteRequestPart
           state="output-available"
           output={{ success: false, message: 'Hubo un error al procesar tu solicitud.' }}
-          isEs={true}
+          language="es"
         />
       );
 
@@ -110,7 +115,7 @@ describe('SubmitQuoteRequestPart', () => {
     });
 
     test('output-error detiene el spinner y lo dice', () => {
-      const container = montar(<SubmitQuoteRequestPart state="output-error" isEs={true} />);
+      const container = montar(<SubmitQuoteRequestPart state="output-error" language="es" />);
 
       expect(haySpinner(container)).toBe(false);
       expect(container.textContent).toMatch(/no se envió/i);
@@ -118,7 +123,7 @@ describe('SubmitQuoteRequestPart', () => {
     });
 
     test('output-error en inglés dice que no se envió y que reintente', () => {
-      const container = montar(<SubmitQuoteRequestPart state="output-error" isEs={false} />);
+      const container = montar(<SubmitQuoteRequestPart state="output-error" language="en" />);
 
       expect(container.textContent).toMatch(/was not submitted/i);
       expect(container.textContent).toMatch(/try again/i);
@@ -132,7 +137,7 @@ describe('SubmitQuoteRequestPart', () => {
       <SubmitQuoteRequestPart
         state={undefined as unknown as undefined}
         output={undefined}
-        isEs={true}
+        language="es"
       />
     );
 

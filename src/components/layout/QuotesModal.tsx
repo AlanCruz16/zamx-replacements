@@ -5,6 +5,7 @@ import { useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { quoteDocumentLines } from '@/lib/quote-document';
 import { outcomeBadge, type BadgeTone } from '@/lib/outcome-badge';
+import { formatCurrency, formatDateTime, messagesFor, resolveLanguage } from '@/lib/messages';
 import { X, FileText, Clock, CheckCircle, AlertCircle, Calendar, Download } from 'lucide-react';
 
 /** La pintura de cada tono. La decisión de qué tono toca vive en `outcomeBadge`. */
@@ -38,12 +39,15 @@ interface QuotesModalProps {
 
 export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
   const quotes = useQuery(api.quotes.getUserQuotes);
+  const user = useQuery(api.users.current);
+
+  // El idioma del Customer manda también aquí: las fechas y la puntuación de
+  // los importes van con él, no con un `es-MX` fijo (ticket 20). La divisa no
+  // —los precios de ZAMX son en USD lea quien lea la lista.
+  const language = resolveLanguage(user?.preferredLanguage);
+  const t = messagesFor(language).quotes;
 
   if (!isOpen) return null;
-
-  const formatCurrency = (value: number) => {
-    return value.toLocaleString('en-US', { style: 'currency', currency: 'USD' });
-  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
@@ -61,12 +65,11 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
             <div className="w-8 h-8 rounded-full bg-[var(--color-brand-blue)]/10 flex items-center justify-center text-[var(--color-brand-blue)]">
               <FileText size={18} />
             </div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              Mis Cotizaciones
-            </h2>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t.title}</h2>
           </div>
           <button
             onClick={onClose}
+            aria-label={t.close}
             className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
           >
             <X size={20} />
@@ -78,7 +81,7 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
           {quotes === undefined ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3 text-gray-400">
               <div className="w-8 h-8 border-2 border-[var(--color-brand-blue)] border-t-transparent rounded-full animate-spin" />
-              <p>Cargando historial...</p>
+              <p>{t.loading}</p>
             </div>
           ) : quotes.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center">
@@ -86,30 +89,21 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
                 <FileText size={32} />
               </div>
               <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">
-                No tienes cotizaciones
+                {t.emptyTitle}
               </h3>
-              <p className="text-sm text-gray-500 max-w-sm">
-                Cuando solicites cotizaciones a través del chatbot, aparecerán aquí para que puedas
-                darles seguimiento.
-              </p>
+              <p className="text-sm text-gray-500 max-w-sm">{t.emptyBody}</p>
             </div>
           ) : (
             <div className="space-y-4">
               {quotes.map((quote) => {
-                const badge = outcomeBadge(quote.outcome, !!quote.customerNotifiedAt);
+                const badge = outcomeBadge(quote.outcome, !!quote.customerNotifiedAt, language);
                 const tone = TONE_STYLES[badge.tone];
                 // El total y el enlace al PDF son la misma pregunta que se hace
                 // el servidor — ¿existe un Quote Document? — resuelta con el
                 // mismo módulo. Ocultar el enlace no es la defensa; la ruta lo
                 // vuelve a comprobar.
                 const lines = quoteDocumentLines(quote);
-                const date = new Date(quote._creationTime).toLocaleDateString('es-MX', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit',
-                });
+                const date = formatDateTime(quote._creationTime, language);
 
                 return (
                   <div
@@ -145,7 +139,7 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
                                 aunque tenga uno guardado. */}
                             {lines !== null && (
                               <span className="text-gray-500">
-                                {formatCurrency(lines.products[idx].subtotalUSD)}
+                                {formatCurrency(lines.products[idx].subtotalUSD, language)}
                               </span>
                             )}
                           </div>
@@ -155,9 +149,9 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
 
                     <div className="flex flex-row sm:flex-col justify-between sm:justify-end items-center sm:items-end pt-3 sm:pt-0 border-t sm:border-t-0 border-gray-100 dark:border-gray-800 gap-2">
                       <div className="text-right">
-                        <div className="text-sm text-gray-500 sm:mb-1">Total (c/ IVA)</div>
+                        <div className="text-sm text-gray-500 sm:mb-1">{t.totalLabel}</div>
                         <div className="font-bold text-lg text-gray-900 dark:text-white">
-                          {lines === null ? '--' : formatCurrency(lines.totals.totalUSD)}
+                          {lines === null ? '--' : formatCurrency(lines.totals.totalUSD, language)}
                         </div>
                       </div>
 
@@ -172,7 +166,7 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
                           className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 rounded-lg text-sm font-medium transition-colors border border-blue-200 dark:border-blue-800/50"
                         >
                           <Download size={14} />
-                          Ver PDF
+                          {t.viewPdf}
                         </a>
                       )}
                     </div>

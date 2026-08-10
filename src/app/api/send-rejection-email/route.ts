@@ -8,6 +8,7 @@ import {
   markRejectionExplained,
 } from '@/lib/internal-api';
 import { QUOTE_SENDER } from '@/lib/addresses';
+import { messagesFor, resolveLanguage } from '@/lib/messages';
 import { render } from 'react-email';
 import React from 'react';
 
@@ -53,7 +54,11 @@ export async function POST(req: Request) {
     // logo y ese enlace sólo resuelven en la máquina de quien los escribió.
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || undefined;
 
-    // 2. Renderizar el HTML del Email
+    // 2. Renderizar el HTML del Email, en el idioma del Customer: un rechazo
+    // que llega en un idioma que no eligió le cuesta más de leer justo cuando
+    // más necesita entender qué hacer (ticket 20).
+    const language = resolveLanguage(user.preferredLanguage);
+    const t = messagesFor(language);
     const emailHtml = await render(
       React.createElement(RejectedQuoteEmail, {
         fullName: user.fullName,
@@ -61,6 +66,7 @@ export async function POST(req: Request) {
         outcome,
         explanation: explanation || quote.approverExplanation,
         baseUrl,
+        language,
       })
     );
 
@@ -70,7 +76,7 @@ export async function POST(req: Request) {
       to: [user.email], // Se envía al correo registrado por el cliente
       // Mismo identificador que el cuerpo y que el resto del recorrido: el
       // `REQ-XXXXXX` a secas, sin un segundo esquema concatenado delante.
-      subject: `Actualización sobre su solicitud ${quote.requestId || requestId}`,
+      subject: t.rejectedQuoteEmail.subject(quote.requestId || requestId),
       html: emailHtml,
     });
 

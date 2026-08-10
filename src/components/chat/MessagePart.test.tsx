@@ -17,7 +17,7 @@ describe('MessagePart', () => {
         <MessagePart
           part={{ type: 'text', text: '**Número de parte:** 175168/A01' }}
           role="assistant"
-          isEs={true}
+          language="es"
         />
       );
 
@@ -31,7 +31,7 @@ describe('MessagePart', () => {
         <MessagePart
           part={{ type: 'text', text: '*   **Modelo:** GR45C-ZID.GG.CR' }}
           role="assistant"
-          isEs={true}
+          language="es"
         />
       );
 
@@ -44,7 +44,7 @@ describe('MessagePart', () => {
   // `**` o un número de parte con guiones bajos, eso es lo que ve de vuelta.
   test('la part de texto del Customer se respeta literal', () => {
     const container = montar(
-      <MessagePart part={{ type: 'text', text: '**GR45C**' }} role="user" isEs={true} />
+      <MessagePart part={{ type: 'text', text: '**GR45C**' }} role="user" language="es" />
     );
 
     expect(container.querySelector('strong')).toBeNull();
@@ -57,7 +57,7 @@ describe('MessagePart', () => {
         <MessagePart
           part={{ type: 'tool-submit_quote_request', state: 'input-available' }}
           role="assistant"
-          isEs={true}
+          language="es"
         />
       );
 
@@ -74,7 +74,7 @@ describe('MessagePart', () => {
             output: { success: true, message: 'ok', requestId: 'REQ-4B7K2Z' },
           }}
           role="assistant"
-          isEs={true}
+          language="es"
         />
       );
 
@@ -88,7 +88,7 @@ describe('MessagePart', () => {
         <MessagePart
           part={{ type: 'tool-submit_quote_request', state: 'output-error' }}
           role="assistant"
-          isEs={true}
+          language="es"
         />
       );
 
@@ -108,7 +108,7 @@ describe('MessagePart', () => {
             output: { success: true, message: 'ok', requestId: 'REQ-4B7K2Z' },
           }}
           role="assistant"
-          isEs={true}
+          language="es"
         />
       );
 
@@ -121,7 +121,7 @@ describe('MessagePart', () => {
       <MessagePart
         part={{ type: 'tool-show_dataplate_guide', state: 'output-available' }}
         role="assistant"
-        isEs={true}
+        language="es"
       />
     );
 
@@ -134,7 +134,7 @@ describe('MessagePart', () => {
       <MessagePart
         part={{ type: 'tool-algo_que_no_existe', state: 'output-available' }}
         role="assistant"
-        isEs={true}
+        language="es"
       />
     );
 
@@ -143,7 +143,7 @@ describe('MessagePart', () => {
 
   test('una part de otro tipo no pinta nada', () => {
     const container = montar(
-      <MessagePart part={{ type: 'step-start' }} role="assistant" isEs={true} />
+      <MessagePart part={{ type: 'step-start' }} role="assistant" language="es" />
     );
 
     expect(container.textContent).toBe('');

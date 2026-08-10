@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { INTERNAL_PATHS, stubInternalConvex } from '@/test/internal-convex';
+import { messagesFor, type Language } from '@/lib/messages';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -51,8 +52,14 @@ function request(headers: Record<string, string>, body: unknown = {}) {
   });
 }
 
-/** Una Replacement Request completa, como la devuelve `getFullQuoteDetails`. */
-function quoteDetails() {
+/**
+ * Una Replacement Request completa, como la devuelve `getFullQuoteDetails`.
+ *
+ * `preferredLanguage` viaja con el Customer porque el correo y su adjunto salen
+ * en el idioma de él: quien lo genera es el servidor, sin navegador al que
+ * preguntarle (ticket 20).
+ */
+function quoteDetails(preferredLanguage: Language = 'es') {
   return {
     quote: {
       _id: 'quote_1',
@@ -77,6 +84,7 @@ function quoteDetails() {
       fullName: 'Ana Cliente',
       companyName: 'Refrigeración del Norte',
       email: 'ana@example.com',
+      preferredLanguage,
     },
   };
 }
@@ -234,6 +242,34 @@ describe('POST /api/send-client-quote', () => {
     expect(bytes).toContain('/Subtype /Image');
     expect(bytes).toContain(`/Width ${width}`);
     expect(bytes).toContain(`/Height ${height}`);
+  });
+
+  /**
+   * El fallo del ticket 20 en el correo: el Customer con la cuenta en inglés
+   * recibía asunto, cuerpo y adjunto en español. Los tres tienen que ir en el
+   * mismo idioma, o el correo se lee a dos voces.
+   */
+  test('el Customer que eligió inglés recibe asunto, cuerpo y adjunto en inglés', async () => {
+    convex.reply(INTERNAL_PATHS.details, quoteDetails('en'));
+    sendEmail.mockResolvedValue({ data: { id: 'email_1' }, error: null });
+    const POST = await loadHandler();
+
+    const res = await POST(
+      request({ 'x-internal-secret': INTERNAL_SECRET }, { requestId: 'REQ-V59X9B' })
+    );
+
+    expect(res.status).toBe(200);
+    const [enviado] = sendEmail.mock.calls[0];
+
+    const en = messagesFor('en');
+    expect(enviado.subject).toBe(en.clientQuoteEmail.subject('REQ-V59X9B'));
+    expect(enviado.subject).not.toContain('cotización');
+    expect(enviado.html).toContain(en.clientQuoteEmail.heading);
+    expect(enviado.html).not.toContain(messagesFor('es').clientQuoteEmail.contents);
+
+    // Hasta el nombre del archivo: el Customer lo ve en su bandeja y en su
+    // carpeta de descargas.
+    expect(enviado.attachments[0].filename).toBe('Quotation_REQ-V59X9B.pdf');
   });
 
   test('sin Confirmed Price no se produce Quote Document ni se cotiza la pieza a cero', async () => {

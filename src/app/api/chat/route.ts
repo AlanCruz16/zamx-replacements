@@ -10,6 +10,7 @@ import {
   persistChatTurn,
 } from '@/lib/internal-api';
 import { SUPPORT_SENDER } from '@/lib/addresses';
+import { messagesFor, resolveLanguage, type Language } from '@/lib/messages';
 import { findSubmission, toStoredMessages } from '../../../../convex/lib/chat';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -24,14 +25,10 @@ export const maxDuration = 30;
  * texto es literalmente lo que se pinta en el chat: tiene que ser una frase
  * para una persona, no un código.
  */
-function tooManyRequests(retryAfterMs: number, language: string): Response {
+function tooManyRequests(retryAfterMs: number, language: Language): Response {
   const minutes = Math.max(1, Math.ceil(retryAfterMs / 60_000));
-  const message =
-    language === 'en'
-      ? `You have sent too many messages. Please try again in about ${minutes} minute${minutes === 1 ? '' : 's'}.`
-      : `Has enviado demasiados mensajes. Vuelve a intentarlo en unos ${minutes} minuto${minutes === 1 ? '' : 's'}.`;
 
-  return new Response(message, {
+  return new Response(messagesFor(language).chatErrors.tooManyRequests(minutes), {
     status: 429,
     headers: { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
   });
@@ -43,19 +40,16 @@ function tooManyRequests(retryAfterMs: number, language: string): Response {
  * literalmente lo que se pinta en el chat, así que es una frase para una
  * persona y le dice qué hacer.
  */
-function conversationAlreadySubmitted(language: string): Response {
-  return new Response(
-    language === 'en'
-      ? 'This conversation is already complete — its replacement request has been submitted. Start a new conversation to quote something else.'
-      : 'Esta conversación ya terminó: su solicitud de reemplazo fue enviada. Empieza una conversación nueva para cotizar algo más.',
-    { status: 409 }
-  );
+function conversationAlreadySubmitted(language: Language): Response {
+  return new Response(messagesFor(language).chatErrors.alreadySubmitted, { status: 409 });
 }
 
 export async function POST(req: Request) {
   const { messages, data } = await req.json();
   const userName = data?.userName || 'Cliente';
-  const language = data?.language || 'es';
+  // El idioma llega del navegador, así que se valida en vez de creerse: lo que
+  // no reconocemos cae al español, igual que el alta del Customer.
+  const language = resolveLanguage(data?.language);
   const { userId } = await auth();
 
   if (!userId) {
@@ -74,12 +68,7 @@ export async function POST(req: Request) {
     // tropiezo de Convex en la ausencia del techo, que es justo lo que no puede
     // pasar sin que nadie se entere.
     console.error('No se pudo consultar el límite de peticiones del chat:', error);
-    return new Response(
-      language === 'en'
-        ? 'The service is unavailable right now. Please try again in a moment.'
-        : 'El servicio no está disponible en este momento. Vuelve a intentarlo en un momento.',
-      { status: 503 }
-    );
+    return new Response(messagesFor(language).chatErrors.unavailable, { status: 503 });
   }
 
   if (!rateLimit.allowed) {
