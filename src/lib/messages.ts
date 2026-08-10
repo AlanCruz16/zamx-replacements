@@ -73,6 +73,12 @@ export function formatDateTime(timestamp: number, language: Language): string {
  * Un importe en dólares. La divisa **no** sigue al idioma: los precios de ZAMX
  * están en USD y lo estarán lea quien lea el documento. Lo que sigue al idioma
  * es la puntuación de los miles y los decimales.
+ *
+ * En español eso se lee `USD 6,250.00`, no `$6,250.00`, y es a propósito: aquí
+ * el `$` a secas son pesos, así que el símbolo solo le diría al Customer
+ * mexicano un precio veinte veces menor que el real. La lista de Replacement
+ * Requests formateaba en `en-US` fijo justamente para conseguir ese `$`; el
+ * cambio a `USD` es la parte deseada, no un efecto colateral del ticket 20.
  */
 export function formatCurrency(valueUSD: number, language: Language): string {
   return valueUSD.toLocaleString(localeOf(language), {
