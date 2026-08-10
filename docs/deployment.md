@@ -68,13 +68,27 @@ HTTP boundary.
 
 ## Environment variables
 
-Vercel-side variables are listed in the environment documentation (ticket 22). The one this file
-adds is `CONVEX_DEPLOY_KEY`, which is required on both Vercel environments and belongs nowhere else —
-in particular not in `.env.local`.
+**`.env.example` is the list**, variable by variable, split by which runtime owns each. This file
+does not repeat it; where the two disagree, `.env.example` wins, because `src/lib/env-example.test.ts`
+checks it against the source and nothing checks this paragraph.
 
-Convex-side variables (`APP_URL`, `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`,
-`GOOGLE_GENERATIVE_AI_API_KEY`, `IMAP_*`, `INTERNAL_API_SECRET`, `RESEND_API_KEY`) live on the Convex
-deployment, not on Vercel, and are managed with `npx convex env`.
+The one variable this file adds is `CONVEX_DEPLOY_KEY`, which is required on both Vercel
+environments and belongs nowhere else — in particular not in `.env.local`.
+
+Convex-side variables live on the Convex deployment, not on Vercel, and are managed with
+`npx convex env`: `APP_URL`, `CLERK_JWT_ISSUER_DOMAIN`, `CLERK_WEBHOOK_SECRET`, `IMAP_HOST`,
+`IMAP_PORT`, `IMAP_PASSWORD`, and — needed on _both_ sides, with matching values —
+`INTERNAL_API_SECRET`, `GOOGLE_GENERATIVE_AI_API_KEY`, `ADMIN_EMAIL` and `IMAP_USER`.
+
+Two corrections to what this file used to say here, both of them the kind of error ticket 22 exists
+to prevent:
+
+- **`RESEND_API_KEY` is Next.js-side, not Convex-side.** Every Resend call is in a route handler
+  under `src/app/api/`; nothing under `convex/` reads it. A copy on the Convex deployment is inert.
+- **`IMAP_USER` is not Convex-side only, unlike the rest of `IMAP_*`.** Next.js sets it as the
+  `replyTo` on the Approver's emails (`src/app/api/chat/route.ts`,
+  `src/app/api/send-approver-reply/route.ts`) so the reply returns to a mailbox that is being read.
+  Set it in both places, to the same address.
 
 ## Clerk instances
 
@@ -174,8 +188,10 @@ Leave Preview alone. It keeps the development instance, which is what a developm
 ## When the inbox poller stops working
 
 `IMAP_HOST`, `IMAP_USER` and `IMAP_PASSWORD` are read by `convex/emails.ts`, which is a Convex
-action. **The same variables set on Vercel do nothing** — no Next.js route polls the mailbox — and
-that trap has cost a day of silent downtime once already.
+action. **`IMAP_HOST` and `IMAP_PASSWORD` set on Vercel do nothing** — no Next.js route polls the
+mailbox — and that trap has cost a day of silent downtime once already. `IMAP_USER` is the exception:
+Next.js needs its own copy as the `replyTo` on the Approver's emails, so it is the one `IMAP_*`
+variable that must be set on both sides, with the same value.
 
 Since ticket 25 the poller no longer fails silently. Every run is recorded in the `poller_health`
 table, and once the mailbox has gone more than twenty minutes (four cron ticks) without a successful
