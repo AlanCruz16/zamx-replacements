@@ -8,11 +8,13 @@
  * @module
  */
 
+import type * as chat from '../chat.js';
 import type * as crons from '../crons.js';
 import type * as emails from '../emails.js';
 import type * as http from '../http.js';
 import type * as init from '../init.js';
 import type * as lib_approvers from '../lib/approvers.js';
+import type * as lib_chat from '../lib/chat.js';
 import type * as lib_customer_view from '../lib/customer_view.js';
 import type * as lib_delivery from '../lib/delivery.js';
 import type * as lib_inbox_seen from '../lib/inbox_seen.js';
@@ -31,11 +33,13 @@ import type * as users from '../users.js';
 import type { ApiFromModules, FilterApi, FunctionReference } from 'convex/server';
 
 declare const fullApi: ApiFromModules<{
+  chat: typeof chat;
   crons: typeof crons;
   emails: typeof emails;
   http: typeof http;
   init: typeof init;
   'lib/approvers': typeof lib_approvers;
+  'lib/chat': typeof lib_chat;
   'lib/customer_view': typeof lib_customer_view;
   'lib/delivery': typeof lib_delivery;
   'lib/inbox_seen': typeof lib_inbox_seen;

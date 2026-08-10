@@ -1,0 +1,191 @@
+import { v } from 'convex/values';
+import { internalMutation, query, type QueryCtx } from './_generated/server';
+import type { Doc, Id } from './_generated/dataModel';
+import { findSubmission, toTranscriptMessages } from './lib/chat';
+
+/**
+ * Dónde vive una conversación del chat entre una pestaña y la siguiente
+ * (ticket 21).
+ *
+ * Antes vivía entera en la memoria del navegador, dentro de `useChat`: cerrar
+ * la pestaña le costaba al Customer los números de parte y los Modelos que ya
+ * había tecleado y que ya se le habían validado.
+ *
+ * Las dos reglas de autorización del ticket 06, cada una donde corresponde:
+ *
+ * - **Leer** es una superficie del Customer, así que `currentConversation`
+ *   autoriza sobre la identidad de Clerk y sólo puede devolver lo suyo: no
+ *   acepta ningún identificador de sesión, de modo que no existe la petición
+ *   con la que pedir la conversación de otro.
+ * - **Escribir** es camino máquina a máquina. No por desconfiar del Customer
+ *   con sus propios datos, sino porque quien sabe qué dijo el modelo y si la
+ *   herramienta disparó de verdad es el servidor. Si el navegador fuera el que
+ *   reporta el envío, bastaría con que no lo reportara para que la conversación
+ *   siguiera abierta y `submit_quote_request` pudiera disparar por segunda vez
+ *   sobre las mismas piezas.
+ */
+
+/**
+ * Un mensaje tal y como se guarda: el `parts[]` del AI SDK v6 —no un `content`
+ * aplanado— bajo el `id` con el que el SDK lo nombra.
+ */
+const messageValidator = v.object({
+  messageId: v.string(),
+  role: v.union(v.literal('user'), v.literal('assistant'), v.literal('system')),
+  /**
+   * `v.any()` a propósito: las parts son del AI SDK, no nuestras. Un validador
+   * que las enumerara se quedaría corto en cuanto el SDK añadiera un tipo de
+   * part, y el turno se perdería entero por no saber describir un trozo que
+   * sólo teníamos que devolver tal cual.
+   */
+  parts: v.array(v.any()),
+});
+
+/** La última conversación de un Customer, esté abierta o ya enviada. */
+async function latestSession(
+  ctx: QueryCtx,
+  userId: Id<'users'>
+): Promise<Doc<'chat_sessions'> | null> {
+  const [latest] = await ctx.db
+    .query('chat_sessions')
+    .withIndex('by_user_id', (q) => q.eq('userId', userId))
+    .order('desc')
+    .take(1);
+
+  return latest ?? null;
+}
+
+/** Una conversación que ya envió su Replacement Request no admite más mensajes. */
+function isSubmitted(session: Doc<'chat_sessions'>): boolean {
+  return session.submittedAt !== undefined;
+}
+
+/** Los mensajes de una conversación, en el orden en que se dijeron. */
+async function messagesOf(ctx: QueryCtx, sessionId: Id<'chat_sessions'>) {
+  return await ctx.db
+    .query('chat_messages')
+    .withIndex('by_session_id', (q) => q.eq('sessionId', sessionId))
+    .collect();
+}
+
+/** El Customer que hay detrás de una identidad de Clerk. */
+async function userByClerkId(ctx: QueryCtx, clerkId: string) {
+  return await ctx.db
+    .query('users')
+    .withIndex('by_clerk_id', (q) => q.eq('clerkId', clerkId))
+    .unique();
+}
+
+/**
+ * La última conversación del Customer, con sus mensajes en el orden en que se
+ * dijeron. Devuelve `null` sólo si nunca habló.
+ *
+ * Una conversación ya enviada se devuelve igual: es de **solo lectura**, no
+ * invisible. Dentro de ella va la tool part con la que se le confirmó su folio,
+ * y esconderla haría que un refresco le costara justo la confirmación que el
+ * ticket existe para que no se pierda. Que ya no admite mensajes se ve en el
+ * propio transcript —lo mira `findSubmission`, igual que el servidor—, así que
+ * no hace falta que viaje aparte.
+ */
+export const currentConversation = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error('No autenticado');
+    }
+
+    const user = await userByClerkId(ctx, identity.subject);
+    if (!user) {
+      throw new Error('Usuario no encontrado');
+    }
+
+    const session = await latestSession(ctx, user._id);
+    if (session === null) return null;
+
+    return { messages: toTranscriptMessages(await messagesOf(ctx, session._id)) };
+  },
+});
+
+/**
+ * Guarda el turno recién terminado y, si en él disparó `submit_quote_request`,
+ * cierra la conversación.
+ *
+ * Recibe el transcript entero, no sólo lo nuevo: es lo que el AI SDK entrega al
+ * acabar el stream, y reconciliar por el `id` del mensaje sale más barato que
+ * hacer que el servidor lleve la cuenta de por dónde iba. Un mensaje que ya
+ * está se reescribe en su sitio, que es además lo que hace que un turno
+ * reenviado no deje copias.
+ *
+ * Que la conversación se cierre se **deduce del propio transcript** en vez de
+ * recibirse como argumento, para que el registro y el estado no puedan
+ * contradecirse: lo que la cierra es exactamente la part que se guarda en ella.
+ */
+export const persistTurn = internalMutation({
+  args: {
+    clerkId: v.string(),
+    messages: v.array(messageValidator),
+  },
+  handler: async (ctx, args) => {
+    const user = await userByClerkId(ctx, args.clerkId);
+    if (!user) {
+      throw new Error('Usuario no encontrado en la base de datos.');
+    }
+
+    const submission = findSubmission(toTranscriptMessages(args.messages));
+    const now = Date.now();
+    const latest = await latestSession(ctx, user._id);
+
+    // El reenvío de una conversación ya cerrada: el mismo mensaje de envío que
+    // ella guarda vuelve a llegar. Guardarlo abriría otra conversación con las
+    // mismas piezas y la cerraría en el acto, una copia por reenvío. Se
+    // reconoce por el mensaje y no por «hay envío y la última está cerrada»,
+    // porque eso confundiría el reenvío con un envío nuevo y legítimo en el
+    // primer turno de la conversación siguiente.
+    //
+    // No es alcanzable desde la pantalla —el route handler rechaza ese
+    // transcript antes de llegar aquí—, y por eso mismo llegar aquí es un
+    // error, no un caso que haya que absorber en silencio.
+    if (latest !== null && isSubmitted(latest) && submission?.messageId !== undefined) {
+      const before = await messagesOf(ctx, latest._id);
+      if (before.some((m) => m.messageId === submission.messageId)) {
+        throw new Error('La conversación ya envió su Replacement Request.');
+      }
+    }
+
+    const open = latest !== null && !isSubmitted(latest) ? latest : null;
+    const sessionId =
+      open?._id ?? (await ctx.db.insert('chat_sessions', { userId: user._id, lastMessageAt: now }));
+
+    const byMessageId = new Map((await messagesOf(ctx, sessionId)).map((m) => [m.messageId, m]));
+
+    for (const message of args.messages) {
+      const already = byMessageId.get(message.messageId);
+      if (already === undefined) {
+        await ctx.db.insert('chat_messages', { sessionId, ...message });
+      } else {
+        await ctx.db.patch(already._id, { role: message.role, parts: message.parts });
+      }
+    }
+
+    await ctx.db.patch(sessionId, { lastMessageAt: now });
+
+    if (submission === undefined) return null;
+
+    // El identificador viene dentro de la salida de una herramienta, es decir
+    // de texto que viajó por la red. Se apunta sólo si nombra una Replacement
+    // Request de este mismo Customer; si no, la conversación se cierra igual
+    // —el envío ocurrió— pero sin apuntar a un registro que no es suyo.
+    const quoteId =
+      submission.quoteId === undefined ? null : ctx.db.normalizeId('quotes', submission.quoteId);
+    const quote = quoteId === null ? null : await ctx.db.get(quoteId);
+    const own = quote !== null && quote.userId === user._id;
+
+    await ctx.db.patch(sessionId, {
+      submittedAt: now,
+      ...(own ? { submittedQuoteId: quote._id } : {}),
+    });
+
+    return null;
+  },
+});

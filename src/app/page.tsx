@@ -2,24 +2,54 @@
 
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import type { Doc } from '../../convex/_generated/dataModel';
+import { findSubmission } from '../../convex/lib/chat';
 import Navbar from '@/components/layout/Navbar';
 import { GooeyText } from '@/components/ui/gooey-text-morphing';
 import { DottedSurface } from '@/components/ui/dotted-surface';
-import { BotMessageSquare, Wrench, Clock, Send, User, AlertCircle } from 'lucide-react';
+import {
+  BotMessageSquare,
+  Wrench,
+  Clock,
+  Send,
+  User,
+  AlertCircle,
+  MessageSquarePlus,
+} from 'lucide-react';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
+import { DefaultChatTransport, type UIMessage } from 'ai';
 import { MessagePart } from '@/components/chat/MessagePart';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
+/** Lo que se pinta mientras Convex contesta quién es el Customer y qué decía. */
+function Loading() {
+  return (
+    <div className="min-h-screen flex flex-col bg-[var(--background)]">
+      <Navbar />
+      <main className="flex-1 flex items-center justify-center">
+        <div className="animate-pulse flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-gray-200 dark:bg-gray-800"></div>
+          <div className="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded"></div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/**
+ * La pantalla espera a tener la conversación guardada antes de montar el chat
+ * (ticket 21).
+ *
+ * `useChat` toma sus mensajes iniciales una sola vez, al montarse: si se montara
+ * con la conversación todavía en vuelo, arrancaría vacío y la conversación
+ * reanudada no aparecería nunca. Por eso el chat vive en un componente aparte y
+ * aquí sólo se decide cuándo montarlo.
+ */
 export default function Dashboard() {
   const user = useQuery(api.users.current);
-  const userRef = useRef(user);
+  const conversation = useQuery(api.chat.currentConversation);
   const router = useRouter();
-
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
 
   // Onboarding loop check
   useEffect(() => {
@@ -28,7 +58,40 @@ export default function Dashboard() {
     }
   }, [user, router]);
 
-  const { messages, status, error, sendMessage } = useChat({
+  // Still loading Convex data
+  if (user === undefined || conversation === undefined) {
+    return <Loading />;
+  }
+
+  // Not logged in (middleware protects it, but just in case)
+  if (user === null) {
+    return null;
+  }
+
+  // Sin `key`: el chat se monta una vez y `useChat` lee estos mensajes sólo al
+  // montarse. A partir de ahí manda `useChat` — la consulta es reactiva y sigue
+  // devolviendo lo guardado, y re-sembrar con ello pisaría lo que el Customer
+  // esté diciendo ahora mismo.
+  return (
+    <ChatDashboard user={user} initialMessages={(conversation?.messages ?? []) as UIMessage[]} />
+  );
+}
+
+function ChatDashboard({
+  user,
+  initialMessages,
+}: {
+  user: Doc<'users'>;
+  initialMessages: UIMessage[];
+}) {
+  const userRef = useRef(user);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  const { messages, status, error, sendMessage, setMessages } = useChat({
+    messages: initialMessages,
     // eslint-disable-next-line react-hooks/refs
     transport: new DefaultChatTransport({
       api: '/api/chat',
@@ -72,27 +135,22 @@ export default function Dashboard() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Still loading Convex data
-  if (user === undefined) {
-    return (
-      <div className="min-h-screen flex flex-col bg-[var(--background)]">
-        <Navbar />
-        <main className="flex-1 flex items-center justify-center">
-          <div className="animate-pulse flex flex-col items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-gray-200 dark:bg-gray-800"></div>
-            <div className="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded"></div>
-          </div>
-        </main>
-      </div>
-    );
-  }
-
-  // Not logged in (middleware protects it, but just in case)
-  if (user === null) {
-    return null;
-  }
-
   const isEs = user.preferredLanguage === 'es';
+
+  /**
+   * La conversación ya produjo su Replacement Request, así que no admite más
+   * mensajes: el servidor rechaza el turno siguiente para que
+   * `submit_quote_request` no dispare dos veces por las mismas piezas. La
+   * pantalla lo dice antes de que el Customer escriba, en vez de dejarle
+   * teclear para contestarle que no.
+   */
+  const isSubmitted = findSubmission(messages) !== undefined;
+
+  /** Vacía la pantalla para empezar de cero. Lo enviado sigue guardado. */
+  const startNewConversation = () => {
+    setMessages([]);
+    setInputValue('');
+  };
 
   return (
     <div className="min-h-screen flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0">
@@ -270,29 +328,45 @@ export default function Dashboard() {
       {/* Floating Input */}
       <div className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[var(--background)] via-[var(--background)] to-transparent pt-20 pb-8 px-4 pointer-events-none">
         <div className="max-w-4xl mx-auto pointer-events-auto relative">
-          <form onSubmit={handleSubmit} className="relative flex items-center group">
-            <input
-              type="text"
-              value={inputValue}
-              onChange={handleInputChange}
-              placeholder={
-                isEs
-                  ? 'Escribe un mensaje, modelo o número de parte...'
-                  : 'Type a message, model, or part number...'
-              }
-              className="w-full pl-6 pr-16 py-4 rounded-3xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-[#111111]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-blue)]/50 focus:border-transparent text-gray-900 dark:text-gray-100 transition-all text-[16px] md:text-lg disabled:opacity-50"
-              disabled={isLoading}
-            />
-            <div className="absolute inset-y-0 right-2 flex items-center">
-              <button
-                type="submit"
-                disabled={isLoading || !inputValue.trim()}
-                className="p-3 bg-[var(--color-brand-blue)] hover:bg-[var(--color-brand-light)] text-white rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center"
-              >
-                <Send size={18} className="ml-0.5" />
-              </button>
-            </div>
-          </form>
+          {isSubmitted ? (
+            /*
+              La conversación terminó donde tenía que terminar: su Replacement
+              Request ya está enviada. En vez de un campo que el servidor va a
+              rechazar, se le ofrece la única acción que queda.
+            */
+            <button
+              type="button"
+              onClick={startNewConversation}
+              className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-3xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-[#111111]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] text-[16px] md:text-lg font-medium text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)] hover:border-[var(--color-brand-blue)]/50 transition-all"
+            >
+              <MessageSquarePlus size={20} />
+              {isEs ? 'Empezar una conversación nueva' : 'Start a new conversation'}
+            </button>
+          ) : (
+            <form onSubmit={handleSubmit} className="relative flex items-center group">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={handleInputChange}
+                placeholder={
+                  isEs
+                    ? 'Escribe un mensaje, modelo o número de parte...'
+                    : 'Type a message, model, or part number...'
+                }
+                className="w-full pl-6 pr-16 py-4 rounded-3xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-[#111111]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-blue)]/50 focus:border-transparent text-gray-900 dark:text-gray-100 transition-all text-[16px] md:text-lg disabled:opacity-50"
+                disabled={isLoading}
+              />
+              <div className="absolute inset-y-0 right-2 flex items-center">
+                <button
+                  type="submit"
+                  disabled={isLoading || !inputValue.trim()}
+                  className="p-3 bg-[var(--color-brand-blue)] hover:bg-[var(--color-brand-light)] text-white rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center"
+                >
+                  <Send size={18} className="ml-0.5" />
+                </button>
+              </div>
+            </form>
+          )}
           <p className="text-center text-xs text-gray-400 mt-4 font-medium tracking-wide">
             &copy; 2026 ZAMX Replacements. Todos los derechos reservados.
           </p>

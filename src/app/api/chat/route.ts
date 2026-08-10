@@ -4,8 +4,13 @@ import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
 import { Resend } from 'resend';
 import { QuoteRequestTemplate } from '@/emails/QuoteRequestTemplate';
-import { consumeChatRateLimit, createReplacementRequest } from '@/lib/internal-api';
+import {
+  consumeChatRateLimit,
+  createReplacementRequest,
+  persistChatTurn,
+} from '@/lib/internal-api';
 import { SUPPORT_SENDER } from '@/lib/addresses';
+import { findSubmission, toStoredMessages } from '../../../../convex/lib/chat';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -30,6 +35,21 @@ function tooManyRequests(retryAfterMs: number, language: string): Response {
     status: 429,
     headers: { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
   });
+}
+
+/**
+ * Lo que se le dice al Customer que sigue escribiendo en una conversación que
+ * ya produjo su Replacement Request. Como el 429 de arriba, este texto es
+ * literalmente lo que se pinta en el chat, así que es una frase para una
+ * persona y le dice qué hacer.
+ */
+function conversationAlreadySubmitted(language: string): Response {
+  return new Response(
+    language === 'en'
+      ? 'This conversation is already complete — its replacement request has been submitted. Start a new conversation to quote something else.'
+      : 'Esta conversación ya terminó: su solicitud de reemplazo fue enviada. Empieza una conversación nueva para cotizar algo más.',
+    { status: 409 }
+  );
 }
 
 export async function POST(req: Request) {
@@ -64,6 +84,15 @@ export async function POST(req: Request) {
 
   if (!rateLimit.allowed) {
     return tooManyRequests(rateLimit.retryAfterMs, language);
+  }
+
+  // Una conversación que ya disparó `submit_quote_request` es de solo lectura
+  // (ticket 21): se sigue leyendo, pero no admite más mensajes. El transcript
+  // lo manda el navegador, así que es aquí donde eso se hace cumplir — sin esta
+  // comprobación, reenviar una conversación enviada haría que la herramienta
+  // disparase por segunda vez sobre las mismas piezas.
+  if (findSubmission(messages ?? []) !== undefined) {
+    return conversationAlreadySubmitted(language);
   }
 
   const systemPrompt = `
@@ -196,5 +225,20 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
 
   // Return a UI Message Stream response (SSE/data protocol).
   // This is required for useChat's DefaultChatTransport to parse the stream correctly.
-  return result.toUIMessageStreamResponse();
+  return result.toUIMessageStreamResponse({
+    // Pasarle los mensajes originales es lo que hace que el SDK le ponga `id`
+    // al mensaje de respuesta. Sin ese `id` no hay con qué reconciliar el turno
+    // siguiente contra lo ya guardado, y cada reenvío dejaría copias.
+    originalMessages: messages as UIMessage[],
+    onFinish: async ({ messages: transcript }) => {
+      try {
+        await persistChatTurn({ clerkId, messages: toStoredMessages(transcript) });
+      } catch (error) {
+        // El stream ya se le entregó al Customer: aquí no queda respuesta que
+        // cambiar. Perder el transcript es malo, pero reventar rompería un chat
+        // que para él sí funcionó.
+        console.error('No se pudo guardar la conversación del chat:', error);
+      }
+    },
+  });
 }

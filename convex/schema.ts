@@ -84,13 +84,20 @@ export default defineSchema({
    * Conversaciones del chat (ticket 21). Se definen aquí para que el esquema se
    * asiente en un solo commit; el ticket 21 las llena.
    *
-   * `submittedQuoteId` presente => la conversación ya produjo una Replacement
+   * `submittedAt` presente => la conversación ya produjo una Replacement
    * Request y queda de solo lectura, para que `submit_quote_request` no pueda
    * dispararse dos veces por las mismas piezas.
+   *
+   * `submittedQuoteId` es aparte porque es otro hecho: *cuál* fue esa
+   * Replacement Request. Puede faltar aunque el envío ocurriera —el
+   * identificador llega dentro de la salida de una herramienta, y si no nombra
+   * un registro de este Customer no se apunta—, y una conversación cerrada sin
+   * puntero sigue estando cerrada.
    */
   chat_sessions: defineTable({
     userId: v.id('users'),
     lastMessageAt: v.number(),
+    submittedAt: v.optional(v.number()),
     submittedQuoteId: v.optional(v.id('quotes')),
   }).index('by_user_id', ['userId']),
 

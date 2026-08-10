@@ -96,3 +96,15 @@ export function consumeChatRateLimit(
 ): Promise<FunctionReturnType<typeof internal.rate_limit.consumeChat>> {
   return callInternalConvex('/internal/rate-limit/consume', { clerkId });
 }
+
+/**
+ * Guarda el turno de chat que acaba de terminar. Pasa por la frontera interna
+ * porque quien sabe qué dijo el modelo —y si `submit_quote_request` disparó de
+ * verdad— es el servidor: si el navegador fuera el que lo reporta, bastaría con
+ * que no lo reportara para que una conversación ya enviada siguiera abierta.
+ */
+export function persistChatTurn(
+  args: FunctionArgs<typeof internal.chat.persistTurn>
+): Promise<FunctionReturnType<typeof internal.chat.persistTurn>> {
+  return callInternalConvex('/internal/chat/persist-turn', args);
+}

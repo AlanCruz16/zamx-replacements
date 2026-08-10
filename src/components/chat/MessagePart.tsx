@@ -1,6 +1,7 @@
 'use client';
 
 import type { UIMessage } from 'ai';
+import { toolNameOfPart } from '../../../convex/lib/chat';
 import { SubmitQuoteRequestPart } from './SubmitQuoteRequestPart';
 import { AssistantMarkdown } from './AssistantMarkdown';
 import { DataplateGuidePart } from './DataplateGuidePart';
@@ -36,12 +37,14 @@ export function MessagePart({
     );
   }
 
-  if (part.type?.startsWith('tool-') || part.type === 'dynamic-tool') {
-    // En v6 el nombre está en `part.toolName` (dynamic-tool) o en el propio
-    // tipo, `tool-${toolName}`. El `part.toolInvocation` de v4/v5 ya no existe,
-    // y buscarlo sólo dejaba una part sin `state` viva de más.
-    const toolName: string = part.toolName || part.type?.replace('tool-', '');
+  // En v6 el nombre está en `part.toolName` (dynamic-tool) o en el propio tipo,
+  // `tool-${toolName}`. La regla se importa en vez de reescribirse: el servidor
+  // decide con ella si la conversación ya envió su Replacement Request, y dos
+  // copias que se separaran harían que la pantalla y el servidor discreparan
+  // sobre qué herramienta disparó.
+  const toolName = toolNameOfPart(part);
 
+  if (toolName !== undefined) {
     if (toolName === 'show_dataplate_guide') {
       return <DataplateGuidePart isEs={isEs} />;
     }
