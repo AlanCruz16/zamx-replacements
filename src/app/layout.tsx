@@ -1,4 +1,4 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import ConvexClientProvider from '@/components/providers/ConvexClientProvider';
@@ -19,6 +19,16 @@ export const metadata: Metadata = {
   description: 'Sistema de reemplazos para ZIEHL-ABEGG',
 };
 
+/*
+  Se dibuja por debajo de lo que el aparato se reserva —el notch, la barra de
+  gestos— y cada pantalla aparta su contenido de ahí con `--safe-*`
+  (ticket 04 de «usable-on-a-phone»). Sin `viewport-fit: cover` los insets valen
+  siempre 0 y no hay nada que apartar.
+*/
+export const viewport: Viewport = {
+  viewportFit: 'cover',
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -30,7 +40,7 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-[100dvh] flex flex-col">
         <ThemeProvider
           attribute="class"
           defaultTheme="system"

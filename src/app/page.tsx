@@ -32,7 +32,7 @@ import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
  */
 function Loading() {
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--background)]">
+    <div className="min-h-[100dvh] flex flex-col bg-[var(--background)]">
       <Navbar />
       <main className="flex-1 flex items-center justify-center">
         <div className="animate-pulse flex flex-col items-center gap-4">
@@ -226,11 +226,11 @@ function ChatDashboard({
   };
 
   return (
-    <div className="min-h-screen flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0">
+    <div className="min-h-[100dvh] flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0">
       <DottedSurface className="opacity-50 dark:opacity-30" />
       <Navbar />
 
-      <main className="flex-1 flex flex-col pt-4 md:pt-8 px-4 pb-36 max-w-4xl mx-auto w-full">
+      <main className="flex-1 flex flex-col pt-4 md:pt-8 pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pb-[calc(9rem+var(--safe-bottom))] max-w-4xl mx-auto w-full">
         {messages.length === 0 ? (
           /* Welcome Section - Only visible when no messages exist */
           <div className="flex-1 flex flex-col items-center justify-center pt-8 md:pt-16">
@@ -372,7 +372,7 @@ function ChatDashboard({
       </main>
 
       {/* Floating Input */}
-      <div className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[var(--background)] via-[var(--background)] to-transparent pt-20 pb-8 px-4 pointer-events-none">
+      <div className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[var(--background)] via-[var(--background)] to-transparent pt-20 pb-[calc(2rem+var(--safe-bottom))] pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pointer-events-none">
         <div className="max-w-4xl mx-auto pointer-events-auto relative">
           {isSubmitted ? (
             /*

@@ -49,7 +49,7 @@ export default function Navbar() {
   return (
     <>
       <header className="sticky top-0 z-50 w-full bg-white/70 dark:bg-[#0a0a0a]/70 backdrop-blur-md border-b border-gray-200/50 dark:border-gray-800/50 shadow-sm transition-all duration-300">
-        <div className="mx-auto max-w-5xl px-4 h-16 flex items-center justify-between">
+        <div className="mx-auto max-w-5xl pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/favicon.svg" alt={t.logoAlt} className="w-8 h-8 object-contain" />

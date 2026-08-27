@@ -35,3 +35,20 @@ body {
     transform: translateY(0);
   }
 }
+
+/*
+  El hueco que el aparato se reserva para sí —el notch, las esquinas redondeadas,
+  la barra de gestos— dicho una sola vez y en un sitio (ticket 04 de
+  «usable-on-a-phone»). Un navegador sin insets contesta 0px, así que estas
+  variables valen lo mismo en un escritorio: sumarlas no mueve nada allí.
+
+  Se leen desde las clases con `calc(... + var(--safe-bottom))`; `env()` no se
+  puede escribir dentro de un valor arbitrario de Tailwind porque los paréntesis
+  no sobreviven al parser de clases.
+*/
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}

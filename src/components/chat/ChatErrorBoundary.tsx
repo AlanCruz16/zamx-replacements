@@ -84,7 +84,7 @@ export class ChatErrorBoundary extends Component<Props, State> {
     const t = messagesFor(this.props.language).chat;
 
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-[var(--background)] px-4">
+      <div className="min-h-[100dvh] flex flex-col items-center justify-center bg-[var(--background)] px-4">
         <div
           role="alert"
           className="flex w-full max-w-md flex-col items-start gap-3 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-5 py-5 text-[15px] leading-relaxed text-amber-900 dark:text-amber-200"
