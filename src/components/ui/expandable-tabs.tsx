@@ -49,10 +49,18 @@ const spanVariants = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const transition: any = { delay: 0.1, type: 'spring', bounce: 0, duration: 0.6 };
 
+/**
+ * Este componente vino de fuera pintado con los tokens de shadcn/ui —«primary»,
+ * «border», «muted», «background», «foreground»— que este proyecto no define.
+ * No fallaban: no pintaban. Los separadores eran invisibles y la pestaña
+ * seleccionada no tenía fondo. Ahora usa el azul de marca y la paleta de grises
+ * de Tailwind, que sí existen, y `@/lib/undefined-colour-tokens` rompe la suite
+ * si los otros vuelven.
+ */
 export function ExpandableTabs({
   tabs,
   className,
-  activeColor = 'text-primary',
+  activeColor = 'text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]',
   onChange,
 }: ExpandableTabsProps) {
   const [selected, setSelected] = React.useState<number | null>(null);
@@ -73,13 +81,15 @@ export function ExpandableTabs({
     onChange?.(index);
   };
 
-  const Separator = () => <div className="mx-1 h-[24px] w-[1.2px] bg-border" aria-hidden="true" />;
+  const Separator = () => (
+    <div className="mx-1 h-[24px] w-[1.2px] bg-gray-300 dark:bg-gray-600" aria-hidden="true" />
+  );
 
   return (
     <div
       ref={outsideClickRef}
       className={cn(
-        'flex flex-wrap items-center gap-2 rounded-2xl border bg-background p-1 shadow-sm',
+        'flex flex-wrap items-center gap-2 rounded-2xl border bg-[var(--background)] p-1 shadow-sm',
         className
       )}
     >
@@ -101,8 +111,8 @@ export function ExpandableTabs({
             className={cn(
               'relative flex items-center rounded-xl px-4 py-2 text-sm font-medium transition-colors duration-300',
               selected === index
-                ? cn('bg-muted', activeColor)
-                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                ? cn('bg-gray-100 dark:bg-gray-800', activeColor)
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'
             )}
           >
             <Icon size={20} />
