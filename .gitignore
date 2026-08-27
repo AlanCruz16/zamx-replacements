@@ -44,3 +44,7 @@ next-env.d.ts
 
 # agent tickets, specs and wayfinder maps (see docs/agents/issue-tracker.md)
 /.scratch
+
+# enlaces que `convex ai-files` deja para que Claude Code vea las skills; lo que
+# se versiona son las skills mismas, en /.agents/skills
+/.claude/skills
