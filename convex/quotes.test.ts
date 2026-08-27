@@ -684,11 +684,42 @@ describe('llegar a un Outcome es una transición atómica', () => {
 });
 
 describe('quotes.getUserQuotes', () => {
-  test('un llamador no autenticado es rechazado', async () => {
+  /**
+   * Antes esta lectura lanzaba `No autenticado`, y la afirmación era que
+   * lanzara. Cambia a propósito, y lo que la protegía se conserva entero: quien
+   * no se ha identificado sigue sin ver una sola Replacement Request. Devolver
+   * la lista vacía no revela nada que lanzar ocultara —no hay Requests en la
+   * respuesta, ni pista de si existían—, así que la regla de acceso es la
+   * misma; lo único que cambia es cómo se dice.
+   *
+   * Y cómo se decía era el defecto, el mismo que se corrigió en
+   * `chat.currentConversation`: una excepción levantada durante un render de
+   * React no se lee como una negativa sino como una caída. Hoy `QuotesModal`
+   * sólo monta detrás del `{user && …}` del `Navbar`, así que este lanzamiento
+   * no llega a dispararse; pero es el guard lo que lo impide, no la consulta, y
+   * mover la lista a cualquier sitio que pinte durante el handshake volvería a
+   * armar la caída. Las dos lecturas del Customer contestan ahora igual a que
+   * no haya nadie identificado.
+   */
+  test('sin identidad de Clerk no se lee ninguna Replacement Request', async () => {
     const t = convexTest(schema, modules);
     await seed(t);
 
-    await expect(t.query(api.quotes.getUserQuotes, {})).rejects.toThrow('No autenticado');
+    await expect(t.query(api.quotes.getUserQuotes, {})).resolves.toEqual([]);
+  });
+
+  /**
+   * El otro instante frío del mismo handshake: Clerk ya dice quién es el
+   * Customer, pero la fila que lo representa todavía no aterrizó por el
+   * webhook. Es la misma caída en el mismo render, así que se contesta igual.
+   */
+  test('una identidad sin Customer todavía en la base no se lee como una caída', async () => {
+    const t = convexTest(schema, modules);
+    await seed(t);
+
+    await expect(
+      t.withIdentity({ subject: 'user_fantasma' }).query(api.quotes.getUserQuotes, {})
+    ).resolves.toEqual([]);
   });
 
   test('un Customer autenticado ve la suya y no la de otro Customer', async () => {
