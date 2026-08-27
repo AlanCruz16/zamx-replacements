@@ -6,6 +6,9 @@ export default function SignUpPage() {
       routing="path"
       path="/sign-up"
       signInUrl="/sign-in"
+      // Ver la nota en sign-in: sin esto el alta termina sin salir de /sign-up.
+      fallbackRedirectUrl="/"
+      signInFallbackRedirectUrl="/"
       appearance={{
         elements: {
           rootBox: 'w-full mx-auto',
