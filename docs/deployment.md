@@ -99,6 +99,13 @@ development instances`. Nothing is broken today; what it costs is a development-
 development session and rate limits, telemetry, and the development banner shown to real users.
 Ticket 27.
 
+**This is deferred, knowingly, as of 2026-08-10.** There is no plan to move off `*.vercel.app`, so
+the prerequisite below is not arriving soon and production stays on the development instance. The
+runbook further down is complete and ready to execute the day a domain exists; nothing else is
+waiting on it. The one thing that changes with time: the switch orphans every `users` row, so the
+cost of the cutover grows with the number of real accounts. Today they are all test accounts and the
+answer is a wipe. Revisit before that stops being true.
+
 ### It cannot be fixed until there is a custom domain
 
 Clerk will not issue a production instance for `zamx-replacements.vercel.app`. From Clerk's own Vercel
