@@ -62,7 +62,7 @@ export async function callInternalConvex<T>(path: string, body: unknown): Promis
 }
 
 /**
- * Las cuatro llamadas internas que existen, tipadas con el tipo de retorno de la
+ * Las llamadas internas que existen, tipadas con el tipo de retorno de la
  * propia función de Convex, de modo que cambiarla rompa aquí en el typecheck.
  */
 
@@ -84,4 +84,27 @@ export function markQuoteDocumentSent(quoteId: Id<'quotes'>): Promise<null> {
 
 export function markRejectionExplained(quoteId: Id<'quotes'>): Promise<null> {
   return callInternalConvex('/internal/quotes/rejection-explained', { quoteId });
+}
+
+/**
+ * Apunta una petición del Customer contra su techo del chat. Pasa por la
+ * frontera interna como todo lo demás: la cuenta tiene que estar fuera del
+ * alcance del navegador al que limita.
+ */
+export function consumeChatRateLimit(
+  clerkId: string
+): Promise<FunctionReturnType<typeof internal.rate_limit.consumeChat>> {
+  return callInternalConvex('/internal/rate-limit/consume', { clerkId });
+}
+
+/**
+ * Guarda el turno de chat que acaba de terminar. Pasa por la frontera interna
+ * porque quien sabe qué dijo el modelo —y si `submit_quote_request` disparó de
+ * verdad— es el servidor: si el navegador fuera el que lo reporta, bastaría con
+ * que no lo reportara para que una conversación ya enviada siguiera abierta.
+ */
+export function persistChatTurn(
+  args: FunctionArgs<typeof internal.chat.persistTurn>
+): Promise<FunctionReturnType<typeof internal.chat.persistTurn>> {
+  return callInternalConvex('/internal/chat/persist-turn', args);
 }

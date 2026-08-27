@@ -3,6 +3,7 @@ import type { QuoteDocumentProps } from '@/components/pdf/QuoteDocument';
 import { QUOTE_CONTACT } from './addresses';
 import { quoteLogoSrc } from './quote-logo';
 import { quoteDocumentLines } from './quote-document';
+import { formatDate, resolveLanguage } from './messages';
 
 /**
  * Los props del Quote Document a partir de una Replacement Request y su
@@ -17,15 +18,23 @@ import { quoteDocumentLines } from './quote-document';
  * La puerta del Outcome (`quoteDocumentLines`) se aplica aquí dentro, no en cada
  * ruta: ninguna de las dos puede renderizar un documento que no debería existir
  * sin pasar antes por esta función, porque es la única que sabe armar sus props.
+ *
+ * El idioma sale del propio Customer y viaja con los props, fechas incluidas.
+ * Las dos rutas formateaban en `es-MX` a mano, así que un Customer con la cuenta
+ * en inglés recibía un Quote Document en español (ticket 20). Deducirlo de una
+ * cabecera del navegador no serviría: el adjunto del correo lo genera el
+ * servidor sin que haya ningún navegador pidiéndolo.
  */
 export function quoteDocumentProps({ quote, user }: QuoteDetails): QuoteDocumentProps | null {
   const lines = quoteDocumentLines(quote);
   if (!lines) return null;
 
+  const language = resolveLanguage(user.preferredLanguage);
+
   return {
     requestId: quote.requestId,
-    date: new Date(quote._creationTime).toLocaleDateString('es-MX'),
-    validUntil: new Date(quote.expiresAt).toLocaleDateString('es-MX'),
+    date: formatDate(quote._creationTime, language),
+    validUntil: formatDate(quote.expiresAt, language),
     customerInfo: {
       companyName: user.companyName,
       fullName: user.fullName,
@@ -40,6 +49,7 @@ export function quoteDocumentProps({ quote, user }: QuoteDetails): QuoteDocument
     contactName: QUOTE_CONTACT.name,
     contactEmail: QUOTE_CONTACT.email,
     logoSrc: quoteLogoSrc(),
+    language,
   };
 }
 
@@ -53,5 +63,5 @@ export function quoteDocumentProps({ quote, user }: QuoteDetails): QuoteDocument
  */
 interface QuoteDetails {
   quote: Pick<Doc<'quotes'>, '_creationTime' | 'requestId' | 'expiresAt' | 'outcome' | 'products'>;
-  user: Pick<Doc<'users'>, 'companyName' | 'fullName'>;
+  user: Pick<Doc<'users'>, 'companyName' | 'fullName' | 'preferredLanguage'>;
 }

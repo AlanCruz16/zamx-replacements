@@ -4,6 +4,7 @@ import { renderToStream } from '@react-pdf/renderer';
 import { QuoteDocument } from '@/components/pdf/QuoteDocument';
 import { quoteDocumentProps } from '@/lib/quote-document-props';
 import { fetchQuoteDetails } from '@/lib/internal-api';
+import { messagesFor, resolveLanguage, DEFAULT_LANGUAGE } from '@/lib/messages';
 import React from 'react';
 
 export async function GET(req: Request) {
@@ -24,10 +25,15 @@ export async function GET(req: Request) {
     const data = await fetchQuoteDetails(quoteId);
 
     if (!data) {
-      return new NextResponse('Cotización o usuario no encontrados', { status: 404 });
+      // Sin registro no hay Customer del que leer el idioma: se contesta en el
+      // de la casa, que es lo mismo que hace el alta.
+      return new NextResponse(messagesFor(DEFAULT_LANGUAGE).quotes.downloadNotFound, {
+        status: 404,
+      });
     }
 
-    const { quote, user } = data;
+    const { user } = data;
+    const language = resolveLanguage(user.preferredLanguage);
 
     // Camino del Customer: la identidad de Clerk tiene que ser dueña de la
     // Replacement Request. La lectura de arriba es interna precisamente para que
@@ -42,13 +48,12 @@ export async function GET(req: Request) {
     // esté escondido.
     const pdfProps = quoteDocumentProps(data);
     if (!pdfProps) {
-      return new NextResponse('Esta Replacement Request no tiene Quote Document', {
+      return new NextResponse(messagesFor(language).quotes.downloadNoQuoteDocument, {
         status: 409,
       });
     }
 
     // 3. Renderizar el PDF a un Node Stream
-    // @ts-expect-error Incompatibilidad de tipos entre react-pdf y React 19
     const stream = await renderToStream(React.createElement(QuoteDocument, pdfProps));
 
     // 4. Devolver la respuesta con los headers correctos para un PDF
@@ -56,7 +61,7 @@ export async function GET(req: Request) {
     return new NextResponse(stream as any, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `inline; filename="Cotizacion_${pdfProps.requestId}.pdf"`,
+        'Content-Disposition': `inline; filename="${messagesFor(language).quoteDocument.fileNamePrefix}_${pdfProps.requestId}.pdf"`,
       },
     });
   } catch (error) {

@@ -2,24 +2,55 @@
 
 import { useQuery } from 'convex/react';
 import { api } from '../../convex/_generated/api';
+import type { Doc } from '../../convex/_generated/dataModel';
+import { findSubmission } from '../../convex/lib/chat';
 import Navbar from '@/components/layout/Navbar';
 import { GooeyText } from '@/components/ui/gooey-text-morphing';
 import { DottedSurface } from '@/components/ui/dotted-surface';
-import { BotMessageSquare, Wrench, Clock, Send, User } from 'lucide-react';
+import {
+  BotMessageSquare,
+  Wrench,
+  Clock,
+  Send,
+  User,
+  AlertCircle,
+  MessageSquarePlus,
+} from 'lucide-react';
 import { useChat } from '@ai-sdk/react';
-import { DefaultChatTransport } from 'ai';
-import { SubmitQuoteRequestPart } from '@/components/chat/SubmitQuoteRequestPart';
+import { DefaultChatTransport, type UIMessage } from 'ai';
+import { MessagePart } from '@/components/chat/MessagePart';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { messagesFor, resolveLanguage } from '@/lib/messages';
 
+/** Lo que se pinta mientras Convex contesta quién es el Customer y qué decía. */
+function Loading() {
+  return (
+    <div className="min-h-screen flex flex-col bg-[var(--background)]">
+      <Navbar />
+      <main className="flex-1 flex items-center justify-center">
+        <div className="animate-pulse flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-gray-200 dark:bg-gray-800"></div>
+          <div className="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded"></div>
+        </div>
+      </main>
+    </div>
+  );
+}
+
+/**
+ * La pantalla espera a tener la conversación guardada antes de montar el chat
+ * (ticket 21).
+ *
+ * `useChat` toma sus mensajes iniciales una sola vez, al montarse: si se montara
+ * con la conversación todavía en vuelo, arrancaría vacío y la conversación
+ * reanudada no aparecería nunca. Por eso el chat vive en un componente aparte y
+ * aquí sólo se decide cuándo montarlo.
+ */
 export default function Dashboard() {
   const user = useQuery(api.users.current);
-  const userRef = useRef(user);
+  const conversation = useQuery(api.chat.currentConversation);
   const router = useRouter();
-
-  useEffect(() => {
-    userRef.current = user;
-  }, [user]);
 
   // Onboarding loop check
   useEffect(() => {
@@ -28,7 +59,40 @@ export default function Dashboard() {
     }
   }, [user, router]);
 
-  const { messages, status, sendMessage } = useChat({
+  // Still loading Convex data
+  if (user === undefined || conversation === undefined) {
+    return <Loading />;
+  }
+
+  // Not logged in (middleware protects it, but just in case)
+  if (user === null) {
+    return null;
+  }
+
+  // Sin `key`: el chat se monta una vez y `useChat` lee estos mensajes sólo al
+  // montarse. A partir de ahí manda `useChat` — la consulta es reactiva y sigue
+  // devolviendo lo guardado, y re-sembrar con ello pisaría lo que el Customer
+  // esté diciendo ahora mismo.
+  return (
+    <ChatDashboard user={user} initialMessages={(conversation?.messages ?? []) as UIMessage[]} />
+  );
+}
+
+function ChatDashboard({
+  user,
+  initialMessages,
+}: {
+  user: Doc<'users'>;
+  initialMessages: UIMessage[];
+}) {
+  const userRef = useRef(user);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  const { messages, status, error, sendMessage, setMessages } = useChat({
+    messages: initialMessages,
     // eslint-disable-next-line react-hooks/refs
     transport: new DefaultChatTransport({
       api: '/api/chat',
@@ -72,27 +136,27 @@ export default function Dashboard() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // Still loading Convex data
-  if (user === undefined) {
-    return (
-      <div className="min-h-screen flex flex-col bg-[var(--background)]">
-        <Navbar />
-        <main className="flex-1 flex items-center justify-center">
-          <div className="animate-pulse flex flex-col items-center gap-4">
-            <div className="w-12 h-12 rounded-full bg-gray-200 dark:bg-gray-800"></div>
-            <div className="h-4 w-32 bg-gray-200 dark:bg-gray-800 rounded"></div>
-          </div>
-        </main>
-      </div>
-    );
-  }
+  // Toda la copia de la pantalla sale del mismo módulo y del mismo idioma que
+  // el chatbot, el Quote Document y los correos (ticket 20). Antes cada frase
+  // llevaba su propio condicional incrustado en el JSX, así que traducir la
+  // pantalla era acordarse de cada uno.
+  const language = resolveLanguage(user.preferredLanguage);
+  const t = messagesFor(language).chat;
 
-  // Not logged in (middleware protects it, but just in case)
-  if (user === null) {
-    return null;
-  }
+  /**
+   * La conversación ya produjo su Replacement Request, así que no admite más
+   * mensajes: el servidor rechaza el turno siguiente para que
+   * `submit_quote_request` no dispare dos veces por las mismas piezas. La
+   * pantalla lo dice antes de que el Customer escriba, en vez de dejarle
+   * teclear para contestarle que no.
+   */
+  const isSubmitted = findSubmission(messages) !== undefined;
 
-  const isEs = user.preferredLanguage === 'es';
+  /** Vacía la pantalla para empezar de cero. Lo enviado sigue guardado. */
+  const startNewConversation = () => {
+    setMessages([]);
+    setInputValue('');
+  };
 
   return (
     <div className="min-h-screen flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0">
@@ -108,7 +172,7 @@ export default function Dashboard() {
               style={{ animation: 'fadeIn 0.6s ease-out forwards' }}
             >
               <h1 className="text-4xl md:text-5xl font-bold tracking-tight text-gray-900 dark:text-white mb-2">
-                {isEs ? 'Hola,' : 'Hello,'}{' '}
+                {t.greeting}{' '}
                 <span className="text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]">
                   {user.fullName.split(' ')[0]}
                 </span>
@@ -116,15 +180,11 @@ export default function Dashboard() {
 
               <div className="flex flex-col items-center justify-center pt-2">
                 <p className="text-xl md:text-2xl text-gray-600 dark:text-gray-300 font-medium">
-                  {isEs ? 'Cotiza aquí tu' : 'Quote here your'}
+                  {t.quoteHere}
                 </p>
                 <div className="h-[80px] md:h-[100px] flex items-center justify-center w-full -mt-2">
                   <GooeyText
-                    texts={
-                      isEs
-                        ? ['ventilador', 'reemplazo', 'refacción', 'equipo']
-                        : ['fan', 'replacement', 'spare part', 'equipment']
-                    }
+                    texts={t.morphingWords}
                     morphTime={1}
                     cooldownTime={0.6}
                     className="font-bold w-full"
@@ -140,44 +200,26 @@ export default function Dashboard() {
               style={{ animation: 'fadeIn 0.6s ease-out 0.2s forwards' }}
             >
               <button
-                onClick={() =>
-                  append(
-                    isEs
-                      ? 'Quiero cotizar un ventilador de reemplazo.'
-                      : 'I want to quote a replacement fan.'
-                  )
-                }
+                onClick={() => append(t.quoteReplacementPrompt)}
                 className="flex flex-col items-start p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-[#111111]/50 backdrop-blur-sm hover:border-[var(--color-brand-blue)]/50 hover:shadow-lg transition-all duration-300 text-left group"
               >
                 <Wrench className="text-gray-400 group-hover:text-[var(--color-brand-blue)] mb-3 transition-colors" />
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                  {isEs ? 'Cotizar un reemplazo' : 'Quote a replacement'}
+                  {t.quoteReplacementTitle}
                 </h3>
                 <p className="text-sm text-gray-500 mt-1 leading-relaxed">
-                  {isEs
-                    ? 'Inicia el flujo para cotizar uno o varios equipos.'
-                    : 'Start the flow to quote one or more items.'}
+                  {t.quoteReplacementBody}
                 </p>
               </button>
               <button
-                onClick={() =>
-                  append(
-                    isEs
-                      ? 'No encuentro mi número de parte, ¿cómo lo busco?'
-                      : "I can't find my part number, where is it?"
-                  )
-                }
+                onClick={() => append(t.dataplateHelpPrompt)}
                 className="flex flex-col items-start p-5 rounded-2xl border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-[#111111]/50 backdrop-blur-sm hover:border-[var(--color-brand-blue)]/50 hover:shadow-lg transition-all duration-300 text-left group"
               >
                 <Clock className="text-gray-400 group-hover:text-[var(--color-brand-blue)] mb-3 transition-colors" />
                 <h3 className="font-semibold text-gray-900 dark:text-gray-100">
-                  {isEs ? 'Ayuda con la placa de datos' : 'Help with data plate'}
+                  {t.dataplateHelpTitle}
                 </h3>
-                <p className="text-sm text-gray-500 mt-1 leading-relaxed">
-                  {isEs
-                    ? 'Descubre dónde localizar el modelo y número de parte.'
-                    : 'Find out where to locate the model and part number.'}
-                </p>
+                <p className="text-sm text-gray-500 mt-1 leading-relaxed">{t.dataplateHelpBody}</p>
               </button>
             </div>
           </div>
@@ -205,82 +247,9 @@ export default function Dashboard() {
                 >
                   {/* Handling message parts */}
                   {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-                  {m.parts.map((part: any, index: number) => {
-                    if (part.type === 'text') {
-                      return (
-                        <p key={index} className="whitespace-pre-wrap">
-                          {part.text}
-                        </p>
-                      );
-                    }
-
-                    if (part.type?.startsWith('tool-') || part.type === 'dynamic-tool') {
-                      // En v6 el nombre está en `part.toolName` (dynamic-tool) o
-                      // en el propio tipo, `tool-${toolName}`. El
-                      // `part.toolInvocation` de v4/v5 ya no existe, y buscarlo
-                      // sólo dejaba una part sin `state` viva de más.
-                      const toolName: string = part.toolName || part.type?.replace('tool-', '');
-
-                      if (toolName === 'show_dataplate_guide') {
-                        return (
-                          <div
-                            key={index}
-                            className="flex flex-col gap-4 mt-3 mb-2 bg-white/50 dark:bg-black/20 p-4 rounded-xl border border-[var(--color-brand-blue)]/20 shadow-sm"
-                          >
-                            <p className="font-semibold text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]">
-                              {isEs
-                                ? 'Información importante sobre la placa de datos'
-                                : 'Important information about the data plate'}
-                            </p>
-                            <div className="text-sm text-gray-700 dark:text-gray-300 space-y-3">
-                              <p>
-                                {isEs ? 'El ' : 'The '}
-                                <span className="font-bold" style={{ color: '#c59b27' }}>
-                                  {isEs ? 'número de parte' : 'part number'}
-                                </span>
-                                {isEs
-                                  ? ' de un producto ZIEHL-ABEGG es necesario para identificar el reemplazo correcto. Generalmente es un número de 6 dígitos que comienza con un 1 o un 2.'
-                                  : ' of a ZIEHL-ABEGG product is necessary to identify the correct replacement. It is generally a 6-digit number starting with a 1 or a 2.'}
-                              </p>
-                              <p>
-                                {isEs ? 'El ' : 'The '}
-                                <span className="font-bold" style={{ color: '#005b9f' }}>
-                                  {isEs ? 'modelo' : 'fan model'}
-                                </span>
-                                {isEs
-                                  ? ' del ventilador es necesario para confirmar que el número de pieza suministrado coincide con el diseño de la unidad solicitado.'
-                                  : ' is necessary to confirm that the supplied part number matches the requested unit design.'}
-                              </p>
-                            </div>
-                            <div className="rounded-xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-white">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src="/images/dataplate-guide.jpg"
-                                alt="Guía de placa de datos ZIEHL-ABEGG"
-                                className="w-full h-auto object-contain"
-                              />
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      if (toolName === 'submit_quote_request') {
-                        return (
-                          <SubmitQuoteRequestPart
-                            key={index}
-                            state={part.state}
-                            output={part.output}
-                            isEs={isEs}
-                          />
-                        );
-                      }
-
-                      // Una herramienta que no reconocemos no es asunto del
-                      // Customer: no se pinta nada.
-                      return null;
-                    }
-                    return null;
-                  })}
+                  {m.parts.map((part: any, index: number) => (
+                    <MessagePart key={index} part={part} role={m.role} language={language} />
+                  ))}
                 </div>
 
                 {m.role === 'user' && (
@@ -316,36 +285,65 @@ export default function Dashboard() {
             <div ref={messagesEndRef} />
           </div>
         )}
+
+        {/*
+          Lo que el servidor contestó cuando no atendió la petición. El
+          transporte del AI SDK pone el cuerpo de la respuesta no-2xx en
+          `error.message`, así que la frase del techo de peticiones —«has
+          enviado demasiados mensajes, vuelve en unos N minutos»— llega hasta
+          aquí tal cual. Sin esto el Customer sólo veía que no pasaba nada.
+        */}
+        {error && (
+          <div
+            role="alert"
+            className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-5 py-3.5 text-[15px] leading-relaxed text-amber-900 dark:text-amber-200"
+          >
+            <AlertCircle size={20} className="shrink-0 mt-0.5" />
+            <p>{error.message || t.genericError}</p>
+          </div>
+        )}
       </main>
 
       {/* Floating Input */}
       <div className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[var(--background)] via-[var(--background)] to-transparent pt-20 pb-8 px-4 pointer-events-none">
         <div className="max-w-4xl mx-auto pointer-events-auto relative">
-          <form onSubmit={handleSubmit} className="relative flex items-center group">
-            <input
-              type="text"
-              value={inputValue}
-              onChange={handleInputChange}
-              placeholder={
-                isEs
-                  ? 'Escribe un mensaje, modelo o número de parte...'
-                  : 'Type a message, model, or part number...'
-              }
-              className="w-full pl-6 pr-16 py-4 rounded-3xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-[#111111]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-blue)]/50 focus:border-transparent text-gray-900 dark:text-gray-100 transition-all text-[16px] md:text-lg disabled:opacity-50"
-              disabled={isLoading}
-            />
-            <div className="absolute inset-y-0 right-2 flex items-center">
-              <button
-                type="submit"
-                disabled={isLoading || !inputValue.trim()}
-                className="p-3 bg-[var(--color-brand-blue)] hover:bg-[var(--color-brand-light)] text-white rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center"
-              >
-                <Send size={18} className="ml-0.5" />
-              </button>
-            </div>
-          </form>
+          {isSubmitted ? (
+            /*
+              La conversación terminó donde tenía que terminar: su Replacement
+              Request ya está enviada. En vez de un campo que el servidor va a
+              rechazar, se le ofrece la única acción que queda.
+            */
+            <button
+              type="button"
+              onClick={startNewConversation}
+              className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-3xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-[#111111]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] text-[16px] md:text-lg font-medium text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)] hover:border-[var(--color-brand-blue)]/50 transition-all"
+            >
+              <MessageSquarePlus size={20} />
+              {t.startNewConversation}
+            </button>
+          ) : (
+            <form onSubmit={handleSubmit} className="relative flex items-center group">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={handleInputChange}
+                placeholder={t.inputPlaceholder}
+                className="w-full pl-6 pr-16 py-4 rounded-3xl border border-gray-200 dark:border-gray-800 bg-white/90 dark:bg-[#111111]/90 backdrop-blur-xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] dark:shadow-[0_8px_30px_rgb(0,0,0,0.3)] focus:outline-none focus:ring-2 focus:ring-[var(--color-brand-blue)]/50 focus:border-transparent text-gray-900 dark:text-gray-100 transition-all text-[16px] md:text-lg disabled:opacity-50"
+                disabled={isLoading}
+              />
+              <div className="absolute inset-y-0 right-2 flex items-center">
+                <button
+                  type="submit"
+                  disabled={isLoading || !inputValue.trim()}
+                  className="p-3 bg-[var(--color-brand-blue)] hover:bg-[var(--color-brand-light)] text-white rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center"
+                >
+                  <Send size={18} className="ml-0.5" />
+                </button>
+              </div>
+            </form>
+          )}
           <p className="text-center text-xs text-gray-400 mt-4 font-medium tracking-wide">
-            &copy; 2026 ZAMX Replacements. Todos los derechos reservados.
+            {t.copyright}
           </p>
         </div>
       </div>

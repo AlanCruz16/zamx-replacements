@@ -1,6 +1,6 @@
 'use node';
 
-import { internalAction } from './_generated/server';
+import { internalAction, type ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
@@ -14,6 +14,8 @@ import {
   type InboundMessage,
 } from './lib/reply_verdict';
 import { approverAddresses } from './lib/approvers';
+import { classifyPollerFailure, type PollerRun } from './lib/poller_health';
+import { marksMessageSeen, type ReplyDisposition } from './lib/inbox_seen';
 import type { ApproverReplyPayload } from '../src/lib/approver-reply';
 import { requireInternalSecret } from '../src/lib/internal-secret';
 
@@ -42,6 +44,87 @@ function webhookBaseUrl(): string | undefined {
 }
 
 /**
+ * Un POST a una ruta interna de Next, con el secreto en la cabecera. Devuelve si
+ * la ruta lo aceptó: una respuesta 4xx se registra igual que una excepción, que
+ * es lo que faltaba cuando `/api/send-approver-reply` contestaba 404 a todo.
+ */
+async function postInternal(
+  baseUrl: string,
+  internalSecret: string,
+  path: string,
+  body: unknown,
+  label: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${baseUrl}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-internal-secret': internalSecret,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      console.error(`Error trigger ${label}: ${path} contestó ${res.status}`);
+      return false;
+    }
+
+    return true;
+  } catch (e) {
+    console.error(`Error trigger ${label}:`, e);
+    return false;
+  }
+}
+
+/**
+ * Apunta cómo fue este sondeo y, si toca, saca el aviso del sistema.
+ *
+ * Un `console.error` en un panel que nadie está mirando no se distingue del
+ * silencio: así estuvo el sondeo 225 ejecuciones seguidas los días 4 y 5 de
+ * agosto de 2026, con todo lo demás aparentemente sano. Quien decide si hay que
+ * avisar es la mutación, que es la que recuerda; aquí sólo se reporta y se
+ * manda.
+ *
+ * El aviso sale por Resend, cuya credencial es distinta de la de IMAP: el
+ * camino sigue intacto justo en el caso que rompe el sondeo.
+ */
+async function reportPollerRun(
+  ctx: ActionCtx,
+  run: PollerRun,
+  internalSecret: string
+): Promise<void> {
+  const alert = await ctx.runMutation(internal.poller.recordInboxRun, { run });
+  if (alert === null) return;
+
+  const minutos = Math.round(alert.silentForMs / 60000);
+  const baseUrl = webhookBaseUrl();
+
+  const sent =
+    baseUrl === undefined
+      ? false
+      : await postInternal(
+          baseUrl,
+          internalSecret,
+          '/api/send-poller-alert',
+          alert,
+          'Poller Alert'
+        );
+
+  if (sent) return;
+
+  // El aviso no salió. Se retira la marca para que el sondeo siguiente lo
+  // reintente: dejarla puesta convertiría este único tic en el silencio de
+  // siempre, con el apagón entero sin contarle a nadie.
+  console.error(
+    `El buzón lleva ${minutos} minutos sin leerse (${alert.detail}) y el aviso no se pudo mandar${
+      baseUrl === undefined ? ': APP_URL no está configurada' : ''
+    }. Se reintentará en el siguiente sondeo.`
+  );
+  await ctx.runMutation(internal.poller.withdrawInboxAlert, { alertedAt: alert.alertedAt });
+}
+
+/**
  * De quién viene el mensaje, para la lista de Approvers.
  *
  * Se prefiere `Return-Path`, que es donde el servidor receptor deja el remitente
@@ -67,6 +150,10 @@ function senderOf(parsed: any, headerFrom: string | undefined): string {
 export const checkInbox = internalAction({
   args: {},
   handler: async (ctx) => {
+    // Sin credenciales no hay sondeo, y tampoco aviso: así es como se apaga el
+    // sondeo en los despliegues de vista previa, que si no competirían con
+    // producción por las respuestas del mismo buzón (ver `docs/deployment.md`).
+    // Un aviso aquí sería un correo al administrador por cada rama abierta.
     if (!process.env.IMAP_HOST || !process.env.IMAP_USER || !process.env.IMAP_PASSWORD) {
       console.error('Credenciales IMAP no configuradas');
       return;
@@ -95,6 +182,17 @@ export const checkInbox = internalAction({
     }
 
     const messagesToProcess: InboundReply[] = [];
+    const successfulUids: number[] = [];
+
+    /**
+     * Un mensaje se marca leído sólo cuando el sondeo llegó a una decisión sobre
+     * él. La regla vive en `lib/inbox_seen` y está pinchada por una prueba:
+     * marcar leído lo que no se procesó es lo que convertiría el próximo apagón
+     * en pérdida de respuestas.
+     */
+    const noteDisposition = (uid: number, disposition: ReplyDisposition) => {
+      if (marksMessageSeen(disposition)) successfulUids.push(uid);
+    };
 
     try {
       await client.connect();
@@ -116,11 +214,15 @@ export const checkInbox = internalAction({
           // los dos se quedan sin leer, que es lo que hace recuperable a un
           // Approver legítimo que falte en la lista.
           const screening = screenInboundMessage(inbound, approvers);
-          if (screening.kind === 'ignored') continue;
+          if (screening.kind === 'ignored') {
+            noteDisposition(message.uid, 'not_ours');
+            continue;
+          }
           if (screening.kind === 'refused') {
             console.warn(
               `Respuesta a ${screening.requestId} descartada: ${screening.sender} no está en la lista de Approvers. Se deja sin leer.`
             );
+            noteDisposition(message.uid, 'sender_refused');
             continue;
           }
 
@@ -136,6 +238,7 @@ export const checkInbox = internalAction({
       }
     } catch (err) {
       console.error('Error fetching IMAP:', err);
+      await reportPollerRun(ctx, { ok: false, ...classifyPollerFailure(err) }, internalSecret);
       return;
     } finally {
       try {
@@ -145,7 +248,9 @@ export const checkInbox = internalAction({
       }
     }
 
-    const successfulUids: number[] = [];
+    // El buzón se abrió y se leyó entero: esta es la «última lectura correcta»
+    // contra la que se mide un apagón, y la que apaga el que hubiera.
+    await reportPollerRun(ctx, { ok: true }, internalSecret);
 
     // Gana la primera respuesta, y también dentro de un mismo sondeo: de varias
     // respuestas al mismo folio se procesa la del uid más bajo — el uid de IMAP
@@ -163,7 +268,7 @@ export const checkInbox = internalAction({
 
       const [first, later] = kept.uid <= msg.uid ? [kept, msg] : [msg, kept];
       firstReplyPerRequest.set(msg.requestId, first);
-      successfulUids.push(later.uid);
+      noteDisposition(later.uid, 'superseded');
     }
 
     for (const msg of firstReplyPerRequest.values()) {
@@ -200,20 +305,16 @@ export const checkInbox = internalAction({
             newDeliveryWeeks: verdict.deliveryWeeks,
           });
 
-          successfulUids.push(msg.uid);
+          noteDisposition(
+            msg.uid,
+            transition.kind === 'already_settled' ? 'already_settled' : 'applied'
+          );
 
           const baseUrl = webhookBaseUrl();
           const post = (path: string, body: unknown, label: string) =>
             baseUrl === undefined
               ? Promise.resolve()
-              : fetch(`${baseUrl}${path}`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'x-internal-secret': internalSecret,
-                  },
-                  body: JSON.stringify(body),
-                }).catch((e) => console.error(`Error trigger ${label}:`, e));
+              : postInternal(baseUrl, internalSecret, path, body, label);
 
           const replyToApprover = (payload: ApproverReplyPayload) =>
             post('/api/send-approver-reply', { ...payload, to: msg.sender }, 'Approver Reply');
@@ -264,9 +365,13 @@ export const checkInbox = internalAction({
           }
         } else {
           console.log(`Cotización ${msg.requestId} no encontrada.`);
+          noteDisposition(msg.uid, 'request_not_found');
         }
       } catch (e) {
         console.error(`Error procesando con Gemini el REQ ${msg.requestId}:`, e);
+        // El mensaje se queda sin leer: el siguiente sondeo lo vuelve a ver, que
+        // es lo que hace recuperable un fallo del intérprete o de la red.
+        noteDisposition(msg.uid, 'apply_failed');
       }
     }
 

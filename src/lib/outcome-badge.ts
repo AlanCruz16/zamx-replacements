@@ -1,4 +1,5 @@
 import type { Outcome } from '../../convex/lib/outcome';
+import { messagesFor, type Language } from './messages';
 
 /**
  * Qué insignia lleva una Replacement Request en la lista del Customer.
@@ -21,21 +22,30 @@ export interface OutcomeBadge {
   tone: BadgeTone;
 }
 
-export function outcomeBadge(outcome: Outcome | undefined, notified: boolean): OutcomeBadge {
+export function outcomeBadge(
+  outcome: Outcome | undefined,
+  notified: boolean,
+  language: Language
+): OutcomeBadge {
+  // La regla decide qué se dice; el idioma sólo decide con qué palabras. Los
+  // literales viven en `messages.ts` para que la lista del Customer no sea la
+  // única superficie que se quedó en español (ticket 20).
+  const t = messagesFor(language).quotes;
+
   // Ausencia de Outcome = en revisión. No hay literal para esperar.
-  if (outcome === undefined) return { label: 'En revisión por Ventas', tone: 'awaiting' };
+  if (outcome === undefined) return { label: t.badgeAwaiting, tone: 'awaiting' };
 
   switch (outcome) {
     case 'priced_as_suggested':
     case 'priced_differently':
       return notified
-        ? { label: 'Enviada al correo', tone: 'sent' }
-        : { label: 'Procesando envío...', tone: 'sending' };
+        ? { label: t.badgeSent, tone: 'sent' }
+        : { label: t.badgeSending, tone: 'sending' };
     case 'oem_restricted':
-      return { label: 'Exclusiva del fabricante (OEM)', tone: 'rejected' };
+      return { label: t.badgeOemRestricted, tone: 'rejected' };
     case 'discontinued':
-      return { label: 'Pieza descontinuada', tone: 'rejected' };
+      return { label: t.badgeDiscontinued, tone: 'rejected' };
     case 'blocked_pending_info':
-      return { label: 'Requiere más información', tone: 'blocked' };
+      return { label: t.badgeBlockedPendingInfo, tone: 'blocked' };
   }
 }

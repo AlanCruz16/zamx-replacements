@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { INTERNAL_PATHS, stubInternalConvex } from '@/test/internal-convex';
+import { messagesFor, type Language } from '@/lib/messages';
 
 /**
  * Seam 2 — la ruta interna que le explica al Customer por qué no hay Quote
@@ -34,7 +35,7 @@ function request(headers: Record<string, string>, body: unknown = {}) {
   });
 }
 
-function quoteDetails() {
+function quoteDetails(preferredLanguage: Language = 'es') {
   return {
     quote: {
       _id: 'quote_1',
@@ -49,6 +50,7 @@ function quoteDetails() {
       fullName: 'Ana Cliente',
       companyName: 'Refrigeración del Norte',
       email: 'ana@example.com',
+      preferredLanguage,
     },
   };
 }
@@ -158,5 +160,25 @@ describe('POST /api/send-rejection-email', () => {
     expect(sendEmail).not.toHaveBeenCalled();
     // Y no se registra como explicado algo que nunca se explicó.
     expect(convex.to(INTERNAL_PATHS.rejectionExplained)).toEqual([]);
+  });
+
+  /**
+   * Un rechazo es el correo donde peor sienta el idioma equivocado: es el que le
+   * dice al Customer qué pasó con su solicitud y qué hacer ahora (ticket 20).
+   */
+  test('el Customer que eligió inglés recibe asunto y cuerpo en inglés', async () => {
+    convex.reply(INTERNAL_PATHS.details, quoteDetails('en'));
+    sendEmail.mockResolvedValue({ data: { id: 'email_1' }, error: null });
+    const POST = await loadHandler();
+
+    const res = await POST(request({ 'x-internal-secret': INTERNAL_SECRET }, rejectionBody()));
+
+    expect(res.status).toBe(200);
+    const [enviado] = sendEmail.mock.calls[0];
+
+    const en = messagesFor('en').rejectedQuoteEmail;
+    expect(enviado.subject).toBe(en.subject('REQ-V59X9B'));
+    expect(enviado.html).toContain(en.reasonTitle.discontinued);
+    expect(enviado.html).not.toContain(messagesFor('es').rejectedQuoteEmail.replyInvitation);
   });
 });

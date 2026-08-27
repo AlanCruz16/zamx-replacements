@@ -5,6 +5,7 @@ import { QuoteDocument } from '@/components/pdf/QuoteDocument';
 import { ClientQuoteEmail } from '@/emails/ClientQuoteEmail';
 import { quoteDocumentProps } from '@/lib/quote-document-props';
 import { QUOTE_SENDER } from '@/lib/addresses';
+import { messagesFor } from '@/lib/messages';
 import {
   authorizeInternalRequest,
   fetchQuoteDetails,
@@ -53,14 +54,18 @@ export async function POST(req: Request) {
     }
 
     // 3. Renderizar el PDF a Buffer
-    // @ts-expect-error Incompatibilidad de tipos entre react-pdf y React 19
     const pdfBuffer = await renderToBuffer(React.createElement(QuoteDocument, pdfProps));
 
-    // 4. Renderizar el HTML del Email
+    // 4. Renderizar el HTML del Email. El idioma es el que ya resolvió
+    // `quoteDocumentProps` a partir del registro del Customer, no un segundo
+    // cálculo: el asunto, el cuerpo y el PDF adjunto tienen que salir en el
+    // mismo idioma o el correo se lee a dos voces.
+    const t = messagesFor(pdfProps.language);
     const emailHtml = await render(
       React.createElement(ClientQuoteEmail, {
         fullName: user.fullName,
         requestId: pdfProps.requestId,
+        language: pdfProps.language,
       })
     );
 
@@ -71,11 +76,11 @@ export async function POST(req: Request) {
       // El código `REQ-XXXXXX` es el identificador, y es el mismo que el
       // Customer verá en el asunto, en el cuerpo y en el Quote Document
       // adjunto. Prefijarlo con un `ZAMX-Q-` inventaba un segundo esquema.
-      subject: `Su cotización ${pdfProps.requestId} de ZIEHL-ABEGG México`,
+      subject: t.clientQuoteEmail.subject(pdfProps.requestId),
       html: emailHtml,
       attachments: [
         {
-          filename: `Cotizacion_${pdfProps.requestId}.pdf`,
+          filename: `${t.quoteDocument.fileNamePrefix}_${pdfProps.requestId}.pdf`,
           content: pdfBuffer,
         },
       ],

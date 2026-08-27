@@ -6,6 +6,11 @@ export default function SignInPage() {
       routing="path"
       path="/sign-in"
       signUpUrl="/sign-up"
+      // Sin esto, Clerk sólo sabe a dónde ir si la URL trae `redirect_url`.
+      // Entrando directo a /sign-in no lo trae, y la sesión se queda en la
+      // misma página con el formulario ya vacío.
+      fallbackRedirectUrl="/"
+      signUpFallbackRedirectUrl="/"
       appearance={{
         elements: {
           rootBox: 'w-full mx-auto',

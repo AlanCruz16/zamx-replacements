@@ -4,24 +4,85 @@ import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
 import { Resend } from 'resend';
 import { QuoteRequestTemplate } from '@/emails/QuoteRequestTemplate';
-import { createReplacementRequest } from '@/lib/internal-api';
+import {
+  consumeChatRateLimit,
+  createReplacementRequest,
+  persistChatTurn,
+} from '@/lib/internal-api';
 import { SUPPORT_SENDER } from '@/lib/addresses';
+import { messagesFor, resolveLanguage, type Language } from '@/lib/messages';
+import { findSubmission, toStoredMessages } from '../../../../convex/lib/chat';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Configura el tiempo máximo de espera para la API (útil en Edge)
 export const maxDuration = 30;
 
+/**
+ * Lo que se le dice al Customer que llamó demasiado deprisa, en su idioma y con
+ * el tiempo que le queda. `DefaultChatTransport` convierte el cuerpo de una
+ * respuesta no-2xx en el `message` del error que recibe `useChat`, así que este
+ * texto es literalmente lo que se pinta en el chat: tiene que ser una frase
+ * para una persona, no un código.
+ */
+function tooManyRequests(retryAfterMs: number, language: Language): Response {
+  const minutes = Math.max(1, Math.ceil(retryAfterMs / 60_000));
+
+  return new Response(messagesFor(language).chatErrors.tooManyRequests(minutes), {
+    status: 429,
+    headers: { 'Retry-After': String(Math.ceil(retryAfterMs / 1000)) },
+  });
+}
+
+/**
+ * Lo que se le dice al Customer que sigue escribiendo en una conversación que
+ * ya produjo su Replacement Request. Como el 429 de arriba, este texto es
+ * literalmente lo que se pinta en el chat, así que es una frase para una
+ * persona y le dice qué hacer.
+ */
+function conversationAlreadySubmitted(language: Language): Response {
+  return new Response(messagesFor(language).chatErrors.alreadySubmitted, { status: 409 });
+}
+
 export async function POST(req: Request) {
   const { messages, data } = await req.json();
   const userName = data?.userName || 'Cliente';
-  const language = data?.language || 'es';
+  // El idioma llega del navegador, así que se valida en vez de creerse: lo que
+  // no reconocemos cae al español, igual que el alta del Customer.
+  const language = resolveLanguage(data?.language);
   const { userId } = await auth();
 
   if (!userId) {
     return new Response('Unauthorized', { status: 401 });
   }
   const clerkId = userId;
+
+  // El techo de gasto, antes de cualquier llamada al modelo. La cuenta vive en
+  // Convex y no aquí: esta ruta es una función serverless, y un contador en su
+  // memoria ni sobrevive a la invocación ni se comparte entre instancias.
+  let rateLimit;
+  try {
+    rateLimit = await consumeChatRateLimit(clerkId);
+  } catch (error) {
+    // Si no se puede contar, no se gasta. Fallar abierto convertiría cualquier
+    // tropiezo de Convex en la ausencia del techo, que es justo lo que no puede
+    // pasar sin que nadie se entere.
+    console.error('No se pudo consultar el límite de peticiones del chat:', error);
+    return new Response(messagesFor(language).chatErrors.unavailable, { status: 503 });
+  }
+
+  if (!rateLimit.allowed) {
+    return tooManyRequests(rateLimit.retryAfterMs, language);
+  }
+
+  // Una conversación que ya disparó `submit_quote_request` es de solo lectura
+  // (ticket 21): se sigue leyendo, pero no admite más mensajes. El transcript
+  // lo manda el navegador, así que es aquí donde eso se hace cumplir — sin esta
+  // comprobación, reenviar una conversación enviada haría que la herramienta
+  // disparase por segunda vez sobre las mismas piezas.
+  if (findSubmission(messages ?? []) !== undefined) {
+    return conversationAlreadySubmitted(language);
+  }
 
   const systemPrompt = `
 Eres un asistente experto en ventas y cotizaciones de ZIEHL-ABEGG México.
@@ -43,7 +104,8 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
 - ASISTENCIA AL CLIENTE: Si el cliente no sabe dónde encontrar el número de parte o el modelo, o pide ayuda con la placa de datos, TIENES PROHIBIDO intentar explicarlo con texto. ES OBLIGATORIO que invoques la herramienta "show_dataplate_guide". SOLO invoca la herramienta y NO escribas explicaciones sobre la placa.
 - Pide los datos de forma conversacional, no como un interrogatorio policial, pero mantén el control de la conversación hacia tu objetivo.
 - REGLA CRÍTICA: NO proporciones precios, costos ni tiempos de entrega aproximados bajo NINGUNA circunstancia, incluso si el cliente insiste.
-- Cuando tengas TODOS los datos de al menos un producto (validados), y el cliente confirme explícitamente que no agregará más, DEBES invocar "submit_quote_request" con todos los productos y despedirte indicando que la solicitud está siendo procesada.
+- Cuando tengas TODOS los datos de al menos un producto (validados), y el cliente confirme explícitamente que no agregará más, DEBES invocar "submit_quote_request" con todos los productos.
+- DESPUÉS DE "submit_quote_request": la interfaz ya le muestra al cliente una tarjeta con su folio y con el aviso de que un vendedor revisará su solicitud. NO repitas el folio, ni el aviso, ni el resumen de los productos. Despídete en UNA sola frase breve y cortés, y nada más.
   `;
 
   // Convert incoming UIMessages to ModelMessages using the SDK's built-in converter.
@@ -152,5 +214,20 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
 
   // Return a UI Message Stream response (SSE/data protocol).
   // This is required for useChat's DefaultChatTransport to parse the stream correctly.
-  return result.toUIMessageStreamResponse();
+  return result.toUIMessageStreamResponse({
+    // Pasarle los mensajes originales es lo que hace que el SDK le ponga `id`
+    // al mensaje de respuesta. Sin ese `id` no hay con qué reconciliar el turno
+    // siguiente contra lo ya guardado, y cada reenvío dejaría copias.
+    originalMessages: messages as UIMessage[],
+    onFinish: async ({ messages: transcript }) => {
+      try {
+        await persistChatTurn({ clerkId, messages: toStoredMessages(transcript) });
+      } catch (error) {
+        // El stream ya se le entregó al Customer: aquí no queda respuesta que
+        // cambiar. Perder el transcript es malo, pero reventar rompería un chat
+        // que para él sí funcionó.
+        console.error('No se pudo guardar la conversación del chat:', error);
+      }
+    },
+  });
 }

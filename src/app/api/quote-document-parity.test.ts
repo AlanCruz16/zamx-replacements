@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { INTERNAL_PATHS, stubInternalConvex } from '@/test/internal-convex';
+import type { Language } from '@/lib/messages';
 import type { ReactElement } from 'react';
 import type { QuoteDocumentProps } from '@/components/pdf/QuoteDocument';
 import type { Doc } from '../../../convex/_generated/dataModel';
@@ -61,7 +62,7 @@ let convex: ReturnType<typeof stubInternalConvex>;
  * fixture con forma libre sobrevive a un renombrado de campo y deja de probar lo
  * que dice probar.
  */
-function quoteDetails() {
+function quoteDetails(preferredLanguage: Language = 'es') {
   const products: Doc<'quotes'>['products'] = [
     {
       partNumber: 'P-001',
@@ -101,6 +102,7 @@ function quoteDetails() {
       fullName: 'Ana Cliente',
       companyName: 'Refrigeración del Norte',
       email: 'ana@example.com',
+      preferredLanguage,
     },
   };
 }
@@ -179,5 +181,34 @@ describe('el Quote Document de las dos rutas', () => {
       expect.objectContaining({ partNumber: 'P-001', priceUSD: 3125, deliveryWeeksMin: 25 }),
       expect.objectContaining({ partNumber: 'P-002', priceUSD: 1200, deliveryWeeksMin: 12 }),
     ]);
+  });
+
+  /**
+   * El idioma es parte del documento, así que también tiene que ser el mismo por
+   * las dos rutas: si el adjunto del correo saliera en un idioma y la descarga
+   * en otro, el Customer tendría dos versiones distintas del mismo folio.
+   */
+  test('el idioma del Customer viaja igual por las dos rutas, fechas incluidas', async () => {
+    convex.reply(INTERNAL_PATHS.details, quoteDetails('en'));
+
+    const desdeElCorreo = await propsFromEmailRoute();
+    const desdeLaDescarga = await propsFromDownloadRoute();
+
+    expect(desdeLaDescarga).toEqual(desdeElCorreo);
+    expect(desdeElCorreo.language).toBe('en');
+    // La fecha se formatea una sola vez, aquí, porque el documento lo genera el
+    // servidor: `es-MX` la escribe día/mes y `en-US` mes/día, y el Customer
+    // recibe la suya. Se compara contra el propio locale y no contra una cadena
+    // escrita a mano, que dependería de la zona horaria de quien ejecute esto.
+    const creado = new Date(Date.UTC(2026, 6, 30));
+    expect(desdeElCorreo.date).toBe(creado.toLocaleDateString('en-US'));
+    expect(desdeElCorreo.date).not.toBe(creado.toLocaleDateString('es-MX'));
+  });
+
+  test('el Customer que no eligió inglés recibe su documento en español', async () => {
+    const props = await propsFromEmailRoute();
+
+    expect(props.language).toBe('es');
+    expect(props.date).toBe(new Date(Date.UTC(2026, 6, 30)).toLocaleDateString('es-MX'));
   });
 });

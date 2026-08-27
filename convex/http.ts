@@ -77,6 +77,25 @@ http.route({
 });
 
 http.route({
+  path: '/internal/chat/persist-turn',
+  method: 'POST',
+  handler: internalRoute((body, ctx) =>
+    ctx.runMutation(internal.chat.persistTurn, {
+      clerkId: body.clerkId,
+      messages: body.messages,
+    })
+  ),
+});
+
+http.route({
+  path: '/internal/rate-limit/consume',
+  method: 'POST',
+  handler: internalRoute((body, ctx) =>
+    ctx.runMutation(internal.rate_limit.consumeChat, { clerkId: body.clerkId })
+  ),
+});
+
+http.route({
   path: '/clerk',
   method: 'POST',
   handler: httpAction(async (ctx, req) => {

@@ -1,13 +1,6 @@
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
-
-// Formateador de moneda
-const formatCurrency = (value: number) => {
-  return value.toLocaleString('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-};
+import { formatAmount, messagesFor, type Language } from '@/lib/messages';
 
 const styles = StyleSheet.create({
   page: {
@@ -191,6 +184,13 @@ export interface QuoteDocumentProps {
    * se pueda alcanzar a sí misma por red; ver `@/lib/quote-logo`.
    */
   logoSrc: string;
+  /**
+   * El idioma del Customer. Llega como prop y no se deduce de una cabecera
+   * porque el documento se genera en el servidor: la ruta que lo adjunta al
+   * correo no tiene navegador del que preguntarle nada, y las fechas ya vienen
+   * formateadas con este mismo idioma desde `quoteDocumentProps`.
+   */
+  language: Language;
 }
 
 export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
@@ -205,7 +205,10 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
   contactName,
   contactEmail,
   logoSrc,
+  language,
 }) => {
+  const t = messagesFor(language).quoteDocument;
+
   // La Delivery Estimate se cotiza como rango de semanas enteras, y es de cada
   // pieza: colapsar rangos distintos a un mínimo y un máximo globales anunciaría
   // un rango que ninguna pieza tiene.
@@ -218,7 +221,9 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
     : undefined;
 
   return (
-    <Document>
+    /* `language` es además metadato del PDF: un lector de pantalla necesita
+       saber en qué idioma está el documento que abre. */
+    <Document language={language}>
       <Page size="A4" style={styles.page}>
         {/* TOP LOGO */}
         <View style={styles.topLogoContainer}>
@@ -229,28 +234,26 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
         {/* HEADER */}
         <View style={styles.header}>
           <View style={styles.leftHeader}>
-            <Text style={styles.smallGrayText}>
-              ZIEHL-ABEGG MEXICO | San Pedro Garza García, NL, México
-            </Text>
+            <Text style={styles.smallGrayText}>{t.originLine}</Text>
             <View style={styles.customerData}>
-              <Text style={styles.compactText}>Cliente:</Text>
+              <Text style={styles.compactText}>{t.customerLabel}</Text>
               <Text style={styles.compactText}>{customerInfo.companyName}</Text>
               <Text style={styles.compactText}>{customerInfo.fullName}</Text>
               <Text style={styles.compactText}>{customerInfo.deliveryLocation}</Text>
-              <Text style={styles.compactText}>MEX</Text>
+              <Text style={styles.compactText}>{t.country}</Text>
             </View>
           </View>
 
           <View style={styles.rightHeader}>
-            <Text style={styles.title}>COTIZACIÓN</Text>
+            <Text style={styles.title}>{t.title}</Text>
 
             <View style={styles.metaData}>
               <View style={styles.metaRow}>
-                <Text style={styles.metaLabel}>n° de cotización:</Text>
+                <Text style={styles.metaLabel}>{t.quoteNumberLabel}</Text>
                 <Text style={styles.metaValue}>{requestId}</Text>
               </View>
               <View style={styles.metaRow}>
-                <Text style={styles.metaLabel}>contacto:</Text>
+                <Text style={styles.metaLabel}>{t.contactLabel}</Text>
                 <Text style={styles.metaValue}>{contactName}</Text>
               </View>
               <View style={styles.metaRow}>
@@ -264,51 +267,53 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
         {/* DATE BANNER */}
         <View style={styles.dateBanner}>
           <View>
-            <Text>fecha de solicitud</Text>
+            <Text>{t.requestDateLabel}</Text>
             <Text>{date}</Text>
           </View>
           <View>
-            <Text>número de solicitud</Text>
+            <Text>{t.requestNumberLabel}</Text>
             <Text>{requestId}</Text>
           </View>
           <View>
-            <Text>fecha</Text>
+            <Text>{t.dateLabel}</Text>
             <Text>{date}</Text>
           </View>
         </View>
 
         {/* GREETING */}
         <View style={styles.greeting}>
-          <Text>Estimado/a {customerInfo.fullName},</Text>
-          <Text>Estamos agradecidos por su solicitud de cotización.</Text>
-          <Text>Nos complace ofrecerle lo siguiente:</Text>
+          <Text>{t.greeting(customerInfo.fullName)}</Text>
+          <Text>{t.thanks}</Text>
+          <Text>{t.pleased}</Text>
         </View>
 
         {/* VALID UNTIL */}
         <View style={styles.validUntilBanner}>
-          <Text style={styles.validLabel}>precio válido hasta:</Text>
+          <Text style={styles.validLabel}>{t.validUntilLabel}</Text>
           <Text>{validUntil}</Text>
         </View>
 
         {/* TABLE */}
         <View style={styles.table}>
           <View style={styles.tableHeader}>
-            <Text style={styles.colPos}>pos</Text>
-            <Text style={styles.colQty}>cantidad</Text>
-            <Text style={styles.colItem}>artículo</Text>
-            <Text style={styles.colPrice}>precio/pza.</Text>
-            <Text style={styles.colTotal}>Total</Text>
+            <Text style={styles.colPos}>{t.colPos}</Text>
+            <Text style={styles.colQty}>{t.colQuantity}</Text>
+            <Text style={styles.colItem}>{t.colItem}</Text>
+            <Text style={styles.colPrice}>{t.colUnitPrice}</Text>
+            <Text style={styles.colTotal}>{t.colTotal}</Text>
           </View>
 
           {products.map((p, index) => (
             <View key={index} style={styles.tableRow}>
               <Text style={styles.colPos}>{(index + 1).toFixed(1)}</Text>
-              <Text style={styles.colQty}>{p.quantity} pza</Text>
+              <Text style={styles.colQty}>
+                {p.quantity} {t.unit}
+              </Text>
               <Text style={styles.colItem}>
                 {p.partNumber} ({p.model})
               </Text>
-              <Text style={styles.colPrice}>{formatCurrency(p.priceUSD)} USD</Text>
-              <Text style={styles.colTotal}>{formatCurrency(p.subtotalUSD)} USD</Text>
+              <Text style={styles.colPrice}>{formatAmount(p.priceUSD, language)} USD</Text>
+              <Text style={styles.colTotal}>{formatAmount(p.subtotalUSD, language)} USD</Text>
             </View>
           ))}
         </View>
@@ -316,15 +321,13 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
         {/* DELIVERY TIME */}
         {sharedDelivery ? (
           <Text style={styles.deliveryText}>
-            Tiempo de entrega: {sharedDelivery.deliveryWeeksMin} a {sharedDelivery.deliveryWeeksMax}{' '}
-            semanas
+            {t.deliveryShared(sharedDelivery.deliveryWeeksMin, sharedDelivery.deliveryWeeksMax)}
           </Text>
         ) : (
           <View>
             {products.map((p, index) => (
               <Text key={index} style={styles.deliveryText}>
-                Tiempo de entrega {p.partNumber}: {p.deliveryWeeksMin} a {p.deliveryWeeksMax}{' '}
-                semanas
+                {t.deliveryPerPart(p.partNumber, p.deliveryWeeksMin, p.deliveryWeeksMax)}
               </Text>
             ))}
           </View>
@@ -333,39 +336,33 @@ export const QuoteDocument: React.FC<QuoteDocumentProps> = ({
         {/* TOTALS */}
         <View style={styles.totalsContainer}>
           <View style={styles.totalRow}>
-            <Text>Monto de productos</Text>
-            <Text>{formatCurrency(subtotal)} USD</Text>
+            <Text>{t.totalsProducts}</Text>
+            <Text>{formatAmount(subtotal, language)} USD</Text>
           </View>
           <View style={styles.totalRow}>
-            <Text>IVA (16%)</Text>
-            <Text>{formatCurrency(iva)} USD</Text>
+            <Text>{t.totalsTax}</Text>
+            <Text>{formatAmount(iva, language)} USD</Text>
           </View>
           <View style={styles.totalRowBold}>
-            <Text>Suma total</Text>
-            <Text>{formatCurrency(total)} USD</Text>
+            <Text>{t.totalsSum}</Text>
+            <Text>{formatAmount(total, language)} USD</Text>
           </View>
         </View>
 
         {/* FOOTER */}
         <View style={styles.footer}>
-          <Text>Nuestra oferta no es obligatoria y está sujeta a cualquier cambio.</Text>
-          <Text>Le pedimos referirse a la oferta mencionada al momento de enviar la orden.</Text>
-          <Text style={{ marginTop: 5 }}>
-            Si está interesado en proceder con la compra, por favor envíe un correo a {contactEmail}
-          </Text>
+          <Text>{t.footerNotBinding}</Text>
+          <Text>{t.footerReference}</Text>
+          <Text style={{ marginTop: 5 }}>{t.footerHowToOrder(contactEmail)}</Text>
 
-          <Text style={{ marginTop: 15 }}>Atentamente</Text>
+          <Text style={{ marginTop: 15 }}>{t.closing}</Text>
           <Text>ZIEHL-ABEGG MEXICO</Text>
 
           <Text style={styles.signatureName}>{contactName}</Text>
-          <Text style={styles.automatedNote}>
-            (esta cotización fue generada automáticamente - válida sin firma)
-          </Text>
+          <Text style={styles.automatedNote}>{t.automatedNote}</Text>
 
-          <Text style={styles.confidential}>
-            Este documento es confidencial y está protegido por la ley.
-          </Text>
-          <Text style={styles.confidential}>Su divulgación no está autorizada.</Text>
+          <Text style={styles.confidential}>{t.confidentialProtected}</Text>
+          <Text style={styles.confidential}>{t.confidentialDisclosure}</Text>
         </View>
       </Page>
     </Document>
