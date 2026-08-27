@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { montar } from '@/test/render-component';
 import { LANGUAGES, messagesFor, type Language } from '@/lib/messages';
 import { distinctivePhrases, otherLanguage } from '@/test/languages';
+import { getFunctionName } from 'convex/server';
 
 /**
  * La pantalla de chat, en los dos idiomas.
@@ -49,21 +50,52 @@ function chatState(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function render(language: Language, chat = chatState()) {
-  // Primero el Customer, después su conversación guardada (ticket 21): la
-  // pantalla espera a las dos antes de montar el chat.
-  useQuery
-    .mockReturnValueOnce({
-      fullName: 'Ana Cliente',
-      companyName: 'Refrigeración del Norte',
-      clerkId: 'user_ana',
-      preferredLanguage: language,
-    })
-    .mockReturnValueOnce(null);
+/** El Customer que la pantalla da por sentado, en el idioma que se le pida. */
+function customer(language: Language) {
+  return {
+    fullName: 'Ana Cliente',
+    companyName: 'Refrigeración del Norte',
+    clerkId: 'user_ana',
+    preferredLanguage: language,
+  };
+}
+
+type Screen = {
+  user?: unknown;
+  conversation?: unknown;
+  chat?: ReturnType<typeof chatState>;
+};
+
+/**
+ * La pantalla con sus dos consultas puestas a mano, para poder pararla en un
+ * instante concreto del arranque y no sólo en el que ya lo tiene todo.
+ *
+ * Cada consulta se responde por *cuál* es y no por el orden en que se pidió: el
+ * orden aguanta un render y se rompe en el siguiente —el efecto del onboarding
+ * provoca uno—, y al romperse devolvería `undefined`, que la pantalla lee como
+ * «todavía cargando». Una regresión de verdad se leería entonces como una
+ * prueba en verde.
+ *
+ * Se reconoce por el nombre y no por la referencia porque `api` es un proxy que
+ * fabrica un objeto nuevo en cada acceso: `api.users.current` nunca es igual a
+ * sí mismo. El nombre —`users:current`— sí es estable.
+ */
+async function renderScreen({ user, conversation, chat = chatState() }: Screen) {
+  useQuery.mockImplementation((reference: Parameters<typeof getFunctionName>[0]) => {
+    const name = getFunctionName(reference);
+    if (name === 'users:current') return user;
+    if (name === 'chat:currentConversation') return conversation;
+    throw new Error(`La pantalla pidió \`${name}\`, que esta prueba no conoce.`);
+  });
   useChat.mockReturnValue(chat);
 
   const { default: Dashboard } = await import('./page');
   return montar(<Dashboard />);
+}
+
+/** La pantalla ya arrancada del todo: el Customer puesto y sin nada guardado. */
+async function render(language: Language, chat = chatState()) {
+  return renderScreen({ user: customer(language), conversation: null, chat });
 }
 
 /**
@@ -172,5 +204,33 @@ describe('la pantalla de chat', () => {
     expect(container.textContent).not.toContain(messagesFor(otro).chat.startNewConversation);
     // Y la tarjeta del envío, que es una pieza aparte, va en el mismo idioma.
     expect(container.textContent).toContain(messagesFor(language).chat.submittedTitle);
+  });
+});
+
+/**
+ * El arranque en frío (ticket 01 de «usable-on-a-phone»).
+ *
+ * En un teléfono el handshake de Clerk tarda lo suficiente como para que la
+ * pantalla se monte antes de tener credenciales. Ahí `currentConversation`
+ * lanzaba, y la excepción salía dentro del render: el Customer se quedaba en
+ * una página de error en vez de en la pantalla. Ahora contesta nada, igual que
+ * su vecina, y lo que se pinta mientras tanto es la espera que la pantalla ya
+ * tenía.
+ */
+describe('la pantalla de chat con credenciales frías', () => {
+  test('mientras las consultas están en vuelo se pinta la espera', async () => {
+    const container = await renderScreen({ user: undefined, conversation: undefined });
+
+    expect(container.querySelector('.animate-pulse')).not.toBeNull();
+    expect(container.textContent).not.toContain(messagesFor('es').chat.greeting);
+  });
+
+  test('con la conversación resuelta en nada se monta el chat igual', async () => {
+    // Es lo que devuelve la consulta en cuanto llegan las credenciales de un
+    // Customer que todavía no ha hablado —y lo que devolvía antes de hablar era
+    // lo mismo, así que la pantalla no distingue este caso del de siempre.
+    const container = await renderScreen({ user: customer('es'), conversation: null });
+
+    expect(container.textContent).toContain(messagesFor('es').chat.greeting);
   });
 });

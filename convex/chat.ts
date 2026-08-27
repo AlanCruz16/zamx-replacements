@@ -78,7 +78,8 @@ async function userByClerkId(ctx: QueryCtx, clerkId: string) {
 
 /**
  * La última conversación del Customer, con sus mensajes en el orden en que se
- * dijeron. Devuelve `null` sólo si nunca habló.
+ * dijeron. Devuelve `null` si nunca habló —y también en los dos instantes fríos
+ * que se explican más abajo.
  *
  * Una conversación ya enviada se devuelve igual: es de **solo lectura**, no
  * invisible. Dentro de ella va la tool part con la que se le confirmó su folio,
@@ -86,19 +87,30 @@ async function userByClerkId(ctx: QueryCtx, clerkId: string) {
  * ticket existe para que no se pierda. Que ya no admite mensajes se ve en el
  * propio transcript —lo mira `findSubmission`, igual que el servidor—, así que
  * no hace falta que viaje aparte.
+ *
+ * También devuelve `null` mientras no haya todavía a quién contestarle: sin
+ * identidad de Clerk, o con una identidad cuyo Customer aún no aterrizó por el
+ * webhook. Antes lanzaba en esos dos instantes, y lanzar era el defecto: la
+ * pantalla monta esta consulta con el handshake de Clerk en vuelo, así que la
+ * excepción salía dentro de un render de React —que no la lee como una negativa
+ * sino como una caída— y el Customer acababa en una página de error de la que
+ * no volvía. La regla de acceso no se ha aflojado: quien no se ha identificado
+ * sigue sin ver ninguna conversación, y no ver nada no revela nada que lanzar
+ * ocultara. Lo que cambia es sólo el mecanismo, y así queda igual al de su
+ * vecina `users.current` en la misma pantalla: la espera se dice contestando
+ * nada, que es un estado que la pantalla ya sabe pintar.
+ *
+ * Sólo la lectura. Escribir sigue rechazando a una identidad desconocida —ahí
+ * negarse no le cuesta nada al Customer y protege lo que se guarda.
  */
 export const currentConversation = query({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error('No autenticado');
-    }
+    if (!identity) return null;
 
     const user = await userByClerkId(ctx, identity.subject);
-    if (!user) {
-      throw new Error('Usuario no encontrado');
-    }
+    if (!user) return null;
 
     const session = await latestSession(ctx, user._id);
     if (session === null) return null;

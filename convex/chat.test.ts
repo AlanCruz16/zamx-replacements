@@ -205,11 +205,41 @@ describe('un Customer reanuda su propia conversación', () => {
     ]);
   });
 
+  /**
+   * Antes esta lectura lanzaba `No autenticado`, y la afirmación era que
+   * lanzara. Cambia a propósito, y lo que la protegía se conserva entero: quien
+   * no se ha identificado sigue sin ver una sola conversación. Devolver nada no
+   * revela nada que lanzar ocultara —no hay conversación en la respuesta, ni
+   * pista de si existía—, así que la regla de acceso es la misma; lo único que
+   * cambia es cómo se dice.
+   *
+   * Y cómo se decía era el defecto. La pantalla monta esta consulta mientras el
+   * handshake de Clerk está en vuelo, es decir con credenciales todavía frías:
+   * la excepción salía dentro de un render de React, que no la trata como una
+   * negativa sino como una caída, y el Customer se quedaba en una página de
+   * error de la que ya no volvía. Contestando nada, la consulta queda en el
+   * mismo estado de espera que la pantalla ya sabe pintar —el mismo que usa su
+   * vecina `users.current`, que nunca lanzó—, y el render sobrevive hasta que
+   * llegan las credenciales.
+   */
   test('sin identidad de Clerk no se lee ninguna conversación', async () => {
     const t = convexTest(schema, modules);
     await seedCustomer(t, 'user_ana');
 
-    await expect(t.query(api.chat.currentConversation, {})).rejects.toThrow('No autenticado');
+    await expect(t.query(api.chat.currentConversation, {})).resolves.toBeNull();
+  });
+
+  /**
+   * El otro instante frío del mismo handshake: Clerk ya dice quién es el
+   * Customer, pero la fila que lo representa todavía no aterrizó por el webhook.
+   * Es la misma caída en el mismo render, así que se contesta igual.
+   */
+  test('una identidad sin Customer todavía en la base no se lee como una caída', async () => {
+    const t = convexTest(schema, modules);
+
+    await expect(
+      t.withIdentity({ subject: 'user_fantasma' }).query(api.chat.currentConversation, {})
+    ).resolves.toBeNull();
   });
 });
 
