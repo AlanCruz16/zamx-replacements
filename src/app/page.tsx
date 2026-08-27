@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from 'convex/react';
+import { useQuery, useConvexAuth } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Doc } from '../../convex/_generated/dataModel';
 import { findSubmission } from '../../convex/lib/chat';
@@ -23,7 +23,11 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { messagesFor, resolveLanguage } from '@/lib/messages';
 
-/** Lo que se pinta mientras Convex contesta quién es el Customer y qué decía. */
+/**
+ * Lo que se pinta mientras Convex contesta quién es el Customer y qué decía —y
+ * también mientras Clerk termina el handshake, que es cuando las consultas
+ * contestan nada por no haber todavía a quién contestarle.
+ */
 function Loading() {
   return (
     <div className="min-h-screen flex flex-col bg-[var(--background)]">
@@ -50,6 +54,13 @@ function Loading() {
 export default function Dashboard() {
   const user = useQuery(api.users.current);
   const conversation = useQuery(api.chat.currentConversation);
+  /**
+   * Quién distingue «todavía no sabemos» de «no hay sesión». Las consultas ya
+   * no lo dicen: desde ticket 01 ambas contestan nada en los dos casos, que es
+   * justo lo que impide que un render se caiga, y por lo mismo deja de servir
+   * para decidir qué pintar.
+   */
+  const { isLoading: authLoading, isAuthenticated } = useConvexAuth();
   const router = useRouter();
 
   // Onboarding loop check
@@ -59,14 +70,22 @@ export default function Dashboard() {
     }
   }, [user, router]);
 
-  // Still loading Convex data
-  if (user === undefined || conversation === undefined) {
+  // La espera: el handshake de Clerk todavía en vuelo, o alguna de las dos
+  // consultas sin contestar por primera vez.
+  if (authLoading || user === undefined || conversation === undefined) {
     return <Loading />;
   }
 
-  // Not logged in (middleware protects it, but just in case)
-  if (user === null) {
+  // Sin sesión, y ya sabiéndolo. El middleware lo impide; esto es el cinturón.
+  if (!isAuthenticated) {
     return null;
+  }
+
+  // Con sesión pero sin Customer todavía: la fila no ha aterrizado por el
+  // webhook. Es el otro instante frío y también es una espera — antes caía en
+  // la rama de arriba y dejaba al Customer mirando una página en blanco.
+  if (user === null) {
+    return <Loading />;
   }
 
   // Sin `key`: el chat se monta una vez y `useChat` lee estos mensajes sólo al

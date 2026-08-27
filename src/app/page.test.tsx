@@ -17,13 +17,14 @@ import { getFunctionName } from 'convex/server';
  * pinta de verdad.
  */
 
-const { useQuery, useChat, push } = vi.hoisted(() => ({
+const { useQuery, useConvexAuth, useChat, push } = vi.hoisted(() => ({
   useQuery: vi.fn(),
+  useConvexAuth: vi.fn(),
   useChat: vi.fn(),
   push: vi.fn(),
 }));
 
-vi.mock('convex/react', () => ({ useQuery }));
+vi.mock('convex/react', () => ({ useQuery, useConvexAuth }));
 vi.mock('@ai-sdk/react', () => ({ useChat }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 vi.mock('@/components/layout/Navbar', () => ({ default: () => null }));
@@ -60,9 +61,21 @@ function customer(language: Language) {
   };
 }
 
+/**
+ * Lo que `useConvexAuth` contesta. Por defecto, el handshake ya terminado y con
+ * sesión: es el estado en el que está la pantalla en cuanto arranca del todo, y
+ * el que dan por sentado todas las pruebas que no dicen otra cosa.
+ */
+function authState(overrides: Partial<AuthState> = {}): AuthState {
+  return { isLoading: false, isAuthenticated: true, ...overrides };
+}
+
+type AuthState = { isLoading: boolean; isAuthenticated: boolean };
+
 type Screen = {
   user?: unknown;
   conversation?: unknown;
+  auth?: AuthState;
   chat?: ReturnType<typeof chatState>;
 };
 
@@ -80,7 +93,13 @@ type Screen = {
  * fabrica un objeto nuevo en cada acceso: `api.users.current` nunca es igual a
  * sí mismo. El nombre —`users:current`— sí es estable.
  */
-async function renderScreen({ user, conversation, chat = chatState() }: Screen) {
+async function renderScreen({
+  user,
+  conversation,
+  auth = authState(),
+  chat = chatState(),
+}: Screen) {
+  useConvexAuth.mockReturnValue(auth);
   useQuery.mockImplementation((reference: Parameters<typeof getFunctionName>[0]) => {
     const name = getFunctionName(reference);
     if (name === 'users:current') return user;
@@ -223,6 +242,56 @@ describe('la pantalla de chat con credenciales frías', () => {
 
     expect(container.querySelector('.animate-pulse')).not.toBeNull();
     expect(container.textContent).not.toContain(messagesFor('es').chat.greeting);
+  });
+
+  /**
+   * El instante que de verdad ocurre en un teléfono, y el que la corrección de
+   * ticket 01 dejaba a medias. `ConvexProviderWithAuth` no llama a `setAuth`
+   * hasta que Clerk termina, así que durante el handshake las dos consultas se
+   * ejecutan *sin identidad* y contestan `null` —no `undefined`—. Con eso, el
+   * `user === null` de «no ha iniciado sesión» se disparaba y el Customer veía
+   * una página en blanco, sin barra y sin espera: la excepción se había
+   * convertido en un vacío, no en la carga que se pretendía.
+   *
+   * Quien distingue «todavía no sabemos» de «no hay sesión» es
+   * `useConvexAuth().isLoading`, no la respuesta de la consulta: contestar nada
+   * es lo que hacen ambos estados.
+   */
+  test('mientras el handshake está en vuelo se pinta la espera, no una página en blanco', async () => {
+    const container = await renderScreen({
+      user: null,
+      conversation: null,
+      auth: authState({ isLoading: true, isAuthenticated: false }),
+    });
+
+    expect(container.querySelector('.animate-pulse')).not.toBeNull();
+  });
+
+  /**
+   * El otro instante frío: Clerk ya dice quién es, pero la fila del Customer
+   * todavía no aterrizó por el webhook. `users.current` contesta `null` y es
+   * una espera, no una ausencia de sesión — así que se pinta igual.
+   */
+  test('con la sesión puesta y el Customer sin aterrizar se sigue esperando', async () => {
+    const container = await renderScreen({ user: null, conversation: null });
+
+    expect(container.querySelector('.animate-pulse')).not.toBeNull();
+  });
+
+  /**
+   * Y lo que la rama en blanco protegía de verdad se conserva: sin sesión, con
+   * el handshake ya terminado, la pantalla no pinta nada. El middleware ya lo
+   * impide; esto es el cinturón.
+   */
+  test('sin sesión y con el handshake terminado no se pinta nada', async () => {
+    const container = await renderScreen({
+      user: null,
+      conversation: null,
+      auth: authState({ isAuthenticated: false }),
+    });
+
+    expect(container.querySelector('.animate-pulse')).toBeNull();
+    expect(container.textContent).toBe('');
   });
 
   test('con la conversación resuelta en nada se monta el chat igual', async () => {
