@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery, useConvexAuth } from 'convex/react';
+import { useQuery, useConvexAuth, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Doc } from '../../convex/_generated/dataModel';
 import { findSubmission } from '../../convex/lib/chat';
@@ -180,6 +180,7 @@ function ChatDashboard({
   });
 
   const [inputValue, setInputValue] = useState('');
+  const abandonConversation = useMutation(api.chat.abandonCurrentConversation);
   const isLoading = status === 'streaming' || status === 'submitted';
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -219,8 +220,22 @@ function ChatDashboard({
    */
   const isSubmitted = findSubmission(messages) !== undefined;
 
-  /** Vacía la pantalla para empezar de cero. Lo enviado sigue guardado. */
-  const startNewConversation = () => {
+  /**
+   * Empezar de cero: la conversación que hubiera a medias se abandona y la
+   * pantalla se vacía. Lo dicho hasta aquí sigue guardado, sólo deja de ser la
+   * conversación actual.
+   *
+   * Primero el servidor y después la pantalla, no al revés. Vaciar antes de que
+   * la conversación deje de ser la actual sería enseñarle al Customer una
+   * pantalla limpia que la siguiente carga desharía: la consulta la resiembra
+   * (ticket 21), y volvería a estar dentro de la que creía haber dejado.
+   *
+   * Después de un envío no hay nada abierto que abandonar y la mutación no hace
+   * nada, que es lo que permite que sea el mismo camino para «Inicio» y para
+   * «nueva conversación» en vez de dos que hay que mantener de acuerdo.
+   */
+  const startNewConversation = async () => {
+    await abandonConversation({});
     setMessages([]);
     setInputValue('');
   };
@@ -228,7 +243,7 @@ function ChatDashboard({
   return (
     <div className="min-h-[100dvh] flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0">
       <DottedSurface className="opacity-50 dark:opacity-30" />
-      <Navbar />
+      <Navbar onHome={startNewConversation} />
 
       <main className="flex-1 flex flex-col pt-4 md:pt-8 pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pb-[calc(9rem+var(--safe-bottom))] max-w-4xl mx-auto w-full">
         {messages.length === 0 ? (

@@ -3,16 +3,25 @@
 import { UserButton } from '@clerk/nextjs';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { FileText, Globe, Home } from 'lucide-react';
 import { ExpandableTabs, TabItem } from '@/components/ui/expandable-tabs';
 import QuotesModal from './QuotesModal';
 import { messagesFor, resolveLanguage } from '@/lib/messages';
 
-export default function Navbar() {
+/**
+ * `onHome` es lo que hace «Inicio» cuando la pantalla que contiene la barra sabe
+ * a dónde es «inicio» para ella —la de chat lo usa para salirse de la
+ * conversación que el Customer tenga a medias—. Sin él la barra navega a la raíz
+ * y ya está, que es lo correcto para una pantalla que no tiene nada que
+ * abandonar.
+ */
+export default function Navbar({ onHome }: { onHome?: () => void }) {
   const user = useQuery(api.users.current);
   const updateLanguage = useMutation(api.users.updateLanguage);
   const [isQuotesModalOpen, setIsQuotesModalOpen] = useState(false);
+  const router = useRouter();
 
   const toggleLanguage = () => {
     if (!user) return;
@@ -38,7 +47,11 @@ export default function Navbar() {
 
   const handleTabChange = (index: number | null) => {
     if (index === 0) {
-      window.location.href = '/';
+      // Navegación dentro de la app: `window.location.href` forzaba una carga
+      // entera del documento —el bundle, el handshake y todas las consultas otra
+      // vez—, que es lo más caro que un Customer puede tocar con datos móviles.
+      if (onHome) onHome();
+      else router.push('/');
     } else if (index === 2) {
       toggleLanguage();
     } else if (index === 4) {

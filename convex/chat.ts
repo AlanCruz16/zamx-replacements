@@ -1,5 +1,5 @@
 import { v } from 'convex/values';
-import { internalMutation, query, type QueryCtx } from './_generated/server';
+import { internalMutation, mutation, query, type QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { findSubmission, toTranscriptMessages } from './lib/chat';
 
@@ -60,6 +60,21 @@ function isSubmitted(session: Doc<'chat_sessions'>): boolean {
   return session.submittedAt !== undefined;
 }
 
+/** Una conversación de la que el Customer se salió sin enviar nada. */
+function isAbandoned(session: Doc<'chat_sessions'>): boolean {
+  return session.abandonedAt !== undefined;
+}
+
+/**
+ * La conversación que el Customer tiene a medias: ni enviada ni abandonada. Es
+ * la única a la que se le añaden mensajes, y no haberla es lo que hace que el
+ * turno siguiente abra una nueva.
+ */
+function openSession(session: Doc<'chat_sessions'> | null): Doc<'chat_sessions'> | null {
+  if (session === null) return null;
+  return isSubmitted(session) || isAbandoned(session) ? null : session;
+}
+
 /** Los mensajes de una conversación, en el orden en que se dijeron. */
 async function messagesOf(ctx: QueryCtx, sessionId: Id<'chat_sessions'>) {
   return await ctx.db
@@ -115,7 +130,59 @@ export const currentConversation = query({
     const session = await latestSession(ctx, user._id);
     if (session === null) return null;
 
+    // Abandonada: sigue guardada, pero ya no es la conversación de nadie. Sin
+    // esto «Inicio» no llevaría a ningún sitio —la pantalla la resembraría
+    // igual— y el Customer seguiría atrapado dentro de ella.
+    if (isAbandoned(session)) return null;
+
     return { messages: toTranscriptMessages(await messagesOf(ctx, session._id)) };
+  },
+});
+
+/**
+ * El Customer se sale de la conversación que tiene a medias.
+ *
+ * Hasta aquí la única salida de una conversación era enviar la Replacement
+ * Request. La pantalla resiembra siempre la última (ticket 21), así que quien
+ * abría una y se arrepentía se quedaba dentro: «Inicio» recargaba la misma
+ * pantalla y la misma conversación volvía a aparecer.
+ *
+ * No borra nada. Lo que se dijo ahí es del Customer y se queda guardado; lo que
+ * cambia es que deja de ser la actual, de modo que la pantalla ya no la
+ * resiembra y el mensaje siguiente abre otra.
+ *
+ * Sólo toca la que está a medias. Una conversación ya enviada no se reescribe:
+ * ahí hay una Replacement Request y su folio, y taparlos con un abandono
+ * perdería justo la confirmación que el Customer podría estar buscando. No
+ * haber conversación abierta tampoco es un error —tocar «Inicio» dos veces, o
+ * tocarlo sin haber dicho nada, no es nada que reportar—, así que no pasa nada
+ * y no se dice nada.
+ *
+ * Escribe, y por eso exige identidad, como todo lo que escribe aquí: sin ella
+ * rechaza. Es lo contrario que la lectura de al lado, y a propósito —negarse a
+ * escribir para quien no se ha identificado no le cuesta nada al Customer,
+ * mientras que negarse a leer le costaba la pantalla entera (ticket 01)—. Y sólo
+ * alcanza lo suyo: no acepta ningún identificador de sesión, así que no existe
+ * la petición con la que abandonar la conversación de otro.
+ */
+export const abandonCurrentConversation = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error('No autenticado');
+    }
+
+    const user = await userByClerkId(ctx, identity.subject);
+    if (!user) {
+      throw new Error('Usuario no encontrado en la base de datos.');
+    }
+
+    const open = openSession(await latestSession(ctx, user._id));
+    if (open === null) return null;
+
+    await ctx.db.patch(open._id, { abandonedAt: Date.now() });
+    return null;
   },
 });
 
@@ -165,7 +232,7 @@ export const persistTurn = internalMutation({
       }
     }
 
-    const open = latest !== null && !isSubmitted(latest) ? latest : null;
+    const open = openSession(latest);
     const sessionId =
       open?._id ?? (await ctx.db.insert('chat_sessions', { userId: user._id, lastMessageAt: now }));
 

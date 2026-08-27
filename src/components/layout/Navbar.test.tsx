@@ -18,27 +18,40 @@ import type { TabItem } from '@/components/ui/expandable-tabs';
  * entrega la barra, que es lo que decide el ticket 20.
  */
 
-const { useQuery, useMutation } = vi.hoisted(() => ({
+const { useQuery, useMutation, push } = vi.hoisted(() => ({
   useQuery: vi.fn(),
   useMutation: vi.fn(() => vi.fn()),
+  push: vi.fn(),
 }));
 
 vi.mock('convex/react', () => ({ useQuery, useMutation }));
 vi.mock('@clerk/nextjs', () => ({ UserButton: () => null }));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
+
+/**
+ * La pestaña que se toca se guarda para poder tocarla desde una prueba: el
+ * control de verdad ya tiene las suyas (`expandable-tabs.test.tsx`), así que
+ * aquí sólo hace falta poder disparar su `onChange`.
+ */
+const pulsar: { tab: (index: number) => void } = { tab: () => {} };
+
 vi.mock('@/components/ui/expandable-tabs', () => ({
-  ExpandableTabs: ({ tabs }: { tabs: TabItem[] }) => (
-    <div>
-      {tabs.map((tab, index) => (
-        <span key={index}>{tab.title ?? ''} </span>
-      ))}
-    </div>
-  ),
+  ExpandableTabs: ({ tabs, onChange }: { tabs: TabItem[]; onChange: (i: number) => void }) => {
+    pulsar.tab = onChange;
+    return (
+      <div>
+        {tabs.map((tab, index) => (
+          <span key={index}>{tab.title ?? ''} </span>
+        ))}
+      </div>
+    );
+  },
 }));
 
-async function render(language: Language) {
+async function render(language: Language, props: { onHome?: () => void } = {}) {
   useQuery.mockReturnValue({ preferredLanguage: language });
   const { default: Navbar } = await import('./Navbar');
-  return montar(<Navbar />);
+  return montar(<Navbar {...props} />);
 }
 
 beforeEach(() => {
@@ -78,5 +91,33 @@ describe('la barra de navegación', () => {
     expect(container.querySelector('img')?.getAttribute('alt')).toBe(t.logoAlt);
     expect(container.querySelector('[title]')?.getAttribute('title')).toBe(t.countryTitle);
     expect(container.innerHTML).not.toContain(messagesFor(otro).nav.logoAlt);
+  });
+});
+
+/**
+ * «Inicio» en una pantalla que sí tiene de dónde salir.
+ *
+ * La barra vive dentro de la pantalla de chat, y allí «inicio» no es una
+ * dirección: es salirse de la conversación que el Customer tenga a medias. Antes
+ * asignaba `window.location.href`, que en esa pantalla recargaba el documento
+ * entero para volver a la misma conversación —cara y sin salida a la vez—.
+ */
+describe('el control de inicio', () => {
+  test('se lo dice a la pantalla que lo sabe, sin navegar a ningún sitio', async () => {
+    const onHome = vi.fn();
+    await render('es', { onHome });
+
+    pulsar.tab(0);
+
+    expect(onHome).toHaveBeenCalledTimes(1);
+    expect(push).not.toHaveBeenCalled();
+  });
+
+  test('sin nada que abandonar navega a la raíz dentro de la app', async () => {
+    await render('es');
+
+    pulsar.tab(0);
+
+    expect(push).toHaveBeenCalledWith('/');
   });
 });

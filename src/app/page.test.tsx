@@ -18,14 +18,21 @@ import { getFunctionName } from 'convex/server';
  * pinta de verdad.
  */
 
-const { useQuery, useConvexAuth, useChat, push } = vi.hoisted(() => ({
-  useQuery: vi.fn(),
-  useConvexAuth: vi.fn(),
-  useChat: vi.fn(),
-  push: vi.fn(),
-}));
+const { useQuery, useConvexAuth, useMutation, abandonConversation, useChat, push } = vi.hoisted(
+  () => {
+    const abandonConversation = vi.fn(async () => null);
+    return {
+      useQuery: vi.fn(),
+      useConvexAuth: vi.fn(),
+      useMutation: vi.fn(() => abandonConversation),
+      abandonConversation,
+      useChat: vi.fn(),
+      push: vi.fn(),
+    };
+  }
+);
 
-vi.mock('convex/react', () => ({ useQuery, useConvexAuth }));
+vi.mock('convex/react', () => ({ useQuery, useConvexAuth, useMutation }));
 vi.mock('@ai-sdk/react', () => ({ useChat }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 vi.mock('@/components/layout/Navbar', () => ({ default: () => null }));
@@ -224,6 +231,39 @@ describe('la pantalla de chat', () => {
     expect(container.textContent).not.toContain(messagesFor(otro).chat.startNewConversation);
     // Y la tarjeta del envío, que es una pieza aparte, va en el mismo idioma.
     expect(container.textContent).toContain(messagesFor(language).chat.submittedTitle);
+  });
+
+  /**
+   * Empezar otra es empezar otra de verdad: si la pantalla sólo se vaciara, la
+   * consulta que la resiembra (ticket 21) devolvería a la anterior en la carga
+   * siguiente. Por eso el servidor se entera antes que la pantalla.
+   */
+  test('empezar otra conversación abandona la anterior antes de vaciar la pantalla', async () => {
+    const chat = chatState({
+      messages: [
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-submit_quote_request',
+              state: 'output-available',
+              output: { success: true, requestId: 'REQ-V59X9B' },
+            },
+          ],
+        },
+      ],
+    });
+    const container = await render('es', chat);
+    const t = messagesFor('es').chat;
+
+    const boton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes(t.startNewConversation)
+    );
+    boton?.click();
+
+    expect(abandonConversation).toHaveBeenCalled();
+    await vi.waitFor(() => expect(chat.setMessages).toHaveBeenCalledWith([]));
   });
 });
 
