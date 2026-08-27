@@ -24,6 +24,7 @@ import { useEffect, useRef, useState } from 'react';
 import { messagesFor, resolveLanguage, type Language } from '@/lib/messages';
 import { lastKnownLanguage, rememberLanguage } from '@/lib/language-preference';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
+import { useComposerInset } from '@/components/chat/composer-inset';
 
 /**
  * Lo que se pinta mientras Convex contesta quién es el Customer y qué decía —y
@@ -200,6 +201,10 @@ function ChatDashboard({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Lo que el compositor ocupa, dicho una sola vez: lo publica quien lo mide y
+  // lo lee el contenido de debajo (ticket 05).
+  const { composerRef, reserved } = useComposerInset();
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
@@ -241,11 +246,14 @@ function ChatDashboard({
   };
 
   return (
-    <div className="min-h-[100dvh] flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0">
+    <div
+      className="min-h-[100dvh] flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0"
+      style={reserved}
+    >
       <DottedSurface className="opacity-50 dark:opacity-30" />
       <Navbar onHome={startNewConversation} />
 
-      <main className="flex-1 flex flex-col pt-4 md:pt-8 pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pb-[calc(9rem+var(--safe-bottom))] max-w-4xl mx-auto w-full">
+      <main className="flex-1 flex flex-col pt-4 md:pt-8 pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pb-[var(--composer-inset)] max-w-4xl mx-auto w-full">
         {messages.length === 0 ? (
           /* Welcome Section - Only visible when no messages exist */
           <div className="flex-1 flex flex-col items-center justify-center pt-8 md:pt-16">
@@ -387,7 +395,10 @@ function ChatDashboard({
       </main>
 
       {/* Floating Input */}
-      <div className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[var(--background)] via-[var(--background)] to-transparent pt-20 pb-[calc(2rem+var(--safe-bottom))] pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pointer-events-none">
+      <div
+        ref={composerRef}
+        className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[var(--background)] via-[var(--background)] to-transparent pt-20 pb-[calc(2rem+var(--safe-bottom))] pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pointer-events-none"
+      >
         <div className="max-w-4xl mx-auto pointer-events-auto relative">
           {isSubmitted ? (
             /*

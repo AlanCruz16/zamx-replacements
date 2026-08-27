@@ -52,3 +52,19 @@ body {
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
 }
+
+/*
+  El sitio que el compositor del chat le quita al contenido que pasa por debajo
+  (ticket 05 de «usable-on-a-phone»). Quien manda es la medida real del
+  compositor, que `useComposerInset` publica sobre esta misma propiedad en
+  cuanto hay algo pintado que medir.
+
+  Esto es sólo el valor de partida: lo que vale en el servidor y en el primer
+  render, antes de que exista medida. Se queda un poco largo a propósito —el
+  compositor mide 218px en los teléfonos de la lista, donde la línea de copyright
+  ocupa dos renglones—, porque pasarse reserva hueco de más durante un fotograma
+  y quedarse corto tapa contenido.
+*/
+:root {
+  --composer-inset: calc(14rem + var(--safe-bottom));
+}
