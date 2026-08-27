@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { montar } from '@/test/render-component';
 import { LANGUAGES, messagesFor, type Language } from '@/lib/messages';
 import { distinctivePhrases, otherLanguage } from '@/test/languages';
+import { rememberLanguage } from '@/lib/language-preference';
 import { getFunctionName } from 'convex/server';
 
 /**
@@ -301,5 +302,61 @@ describe('la pantalla de chat con credenciales frías', () => {
     const container = await renderScreen({ user: customer('es'), conversation: null });
 
     expect(container.textContent).toContain(messagesFor('es').chat.greeting);
+  });
+});
+
+/**
+ * El cinturón (ticket 02 de «usable-on-a-phone»).
+ *
+ * `ChatErrorBoundary` tiene su propia prueba; lo que se comprueba aquí es que
+ * está puesto de verdad alrededor de esta pantalla, que es lo que decide si el
+ * próximo fallo cuesta un mensaje o la pantalla entera.
+ */
+describe('la pantalla de chat cuando algo por debajo se cae', () => {
+  test('una consulta que lanza deja el mensaje y su reintento, no una página muerta', async () => {
+    // React escribe por consola cada error que recoge una frontera: aquí es lo
+    // esperado.
+    const consola = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    useConvexAuth.mockReturnValue(authState());
+    useQuery.mockImplementation(() => {
+      throw new Error('la consulta de turno se cayó');
+    });
+    useChat.mockReturnValue(chatState());
+
+    const { default: Dashboard } = await import('./page');
+    const container = montar(<Dashboard />);
+
+    const t = messagesFor('es').chat;
+    expect(container.textContent).toContain(t.errorTitle);
+    expect(container.textContent).toContain(t.errorRetry);
+
+    consola.mockRestore();
+  });
+
+  /**
+   * El fallo del arranque en frío ocurre en el primer render, antes de que
+   * ninguna consulta haya contestado quién es el Customer: si el idioma saliera
+   * de ahí, un Customer que eligió inglés leería el error en español. Sale de lo
+   * último que se le conoció, que es lo único que hay a esa altura.
+   */
+  test('el mensaje va en el idioma que el Customer eligió la última vez', async () => {
+    const consola = vi.spyOn(console, 'error').mockImplementation(() => {});
+    rememberLanguage('en');
+
+    useConvexAuth.mockReturnValue(authState());
+    useQuery.mockImplementation(() => {
+      throw new Error('la consulta de turno se cayó');
+    });
+    useChat.mockReturnValue(chatState());
+
+    const { default: Dashboard } = await import('./page');
+    const container = montar(<Dashboard />);
+
+    expect(container.textContent).toContain(messagesFor('en').chat.errorTitle);
+    expect(container.textContent).not.toContain(messagesFor('es').chat.errorTitle);
+
+    window.localStorage.clear();
+    consola.mockRestore();
   });
 });

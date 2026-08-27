@@ -21,7 +21,9 @@ import { DefaultChatTransport, type UIMessage } from 'ai';
 import { MessagePart } from '@/components/chat/MessagePart';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { messagesFor, resolveLanguage } from '@/lib/messages';
+import { messagesFor, resolveLanguage, type Language } from '@/lib/messages';
+import { lastKnownLanguage, rememberLanguage } from '@/lib/language-preference';
+import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
 
 /**
  * Lo que se pinta mientras Convex contesta quién es el Customer y qué decía —y
@@ -43,6 +45,34 @@ function Loading() {
 }
 
 /**
+ * La pantalla, con su cinturón puesto (ticket 02 de «usable-on-a-phone»).
+ *
+ * Lo único que vive aquí arriba es lo que la frontera necesita y no puede
+ * pedirle a lo que protege: el idioma en el que redactar el mensaje si algo se
+ * cae, y la señal por la que darlo por caducado. Esa señal es el handshake:
+ * cuando `isAuthenticated` cambia, las credenciales acaban de llegar, que es
+ * exactamente la causa pasajera de la que un teléfono se ha de recuperar solo.
+ *
+ * El idioma se recibe de la propia pantalla en cuanto lo sabe. Leerlo aquí de
+ * la consulta del Customer dejaría el mensaje de error colgando de una consulta
+ * —la misma clase de pieza cuya caída la frontera existe para recoger—. Mientras
+ * la pantalla no lo diga se usa el último que se le conoció al Customer, porque
+ * el caso que más importa es justo el que la pantalla no llega a contar: si se
+ * cae en su primer render, el efecto que lo diría no ha corrido todavía, y un
+ * Customer que eligió inglés leería el error en español.
+ */
+export default function Dashboard() {
+  const { isAuthenticated } = useConvexAuth();
+  const [language, setLanguage] = useState<Language>(lastKnownLanguage);
+
+  return (
+    <ChatErrorBoundary language={language} resetKeys={[isAuthenticated]}>
+      <ChatScreen onLanguage={setLanguage} />
+    </ChatErrorBoundary>
+  );
+}
+
+/**
  * La pantalla espera a tener la conversación guardada antes de montar el chat
  * (ticket 21).
  *
@@ -51,7 +81,7 @@ function Loading() {
  * reanudada no aparecería nunca. Por eso el chat vive en un componente aparte y
  * aquí sólo se decide cuándo montarlo.
  */
-export default function Dashboard() {
+function ChatScreen({ onLanguage }: { onLanguage: (language: Language) => void }) {
   const user = useQuery(api.users.current);
   const conversation = useQuery(api.chat.currentConversation);
   /**
@@ -62,6 +92,18 @@ export default function Dashboard() {
    */
   const { isLoading: authLoading, isAuthenticated } = useConvexAuth();
   const router = useRouter();
+
+  // El idioma que ha de usar la frontera de error si la pantalla se cae. Se le
+  // dice en cuanto se sabe, y no cuando ya haga falta: para entonces no habría
+  // pantalla a la que preguntárselo. Sólo cuando se sabe de verdad: sin Customer
+  // esto es el idioma por defecto, y anunciarlo pisaría el que se le conoció en
+  // la visita anterior.
+  const language = resolveLanguage(user?.preferredLanguage);
+  useEffect(() => {
+    if (!user) return;
+    onLanguage(language);
+    rememberLanguage(language);
+  }, [user, language, onLanguage]);
 
   // Onboarding loop check
   useEffect(() => {
@@ -93,15 +135,21 @@ export default function Dashboard() {
   // devolviendo lo guardado, y re-sembrar con ello pisaría lo que el Customer
   // esté diciendo ahora mismo.
   return (
-    <ChatDashboard user={user} initialMessages={(conversation?.messages ?? []) as UIMessage[]} />
+    <ChatDashboard
+      user={user}
+      language={language}
+      initialMessages={(conversation?.messages ?? []) as UIMessage[]}
+    />
   );
 }
 
 function ChatDashboard({
   user,
+  language,
   initialMessages,
 }: {
   user: Doc<'users'>;
+  language: Language;
   initialMessages: UIMessage[];
 }) {
   const userRef = useRef(user);
@@ -158,8 +206,8 @@ function ChatDashboard({
   // Toda la copia de la pantalla sale del mismo módulo y del mismo idioma que
   // el chatbot, el Quote Document y los correos (ticket 20). Antes cada frase
   // llevaba su propio condicional incrustado en el JSX, así que traducir la
-  // pantalla era acordarse de cada uno.
-  const language = resolveLanguage(user.preferredLanguage);
+  // pantalla era acordarse de cada uno. El idioma lo resuelve quien monta esta
+  // pieza, que es también quien se lo dice a la frontera de error.
   const t = messagesFor(language).chat;
 
   /**
