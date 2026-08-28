@@ -68,3 +68,20 @@ body {
 :root {
   --composer-inset: calc(14rem + var(--safe-bottom));
 }
+
+/*
+  iOS hace zoom sobre cualquier campo cuya letra mida menos de 16px, y deshacer
+  ese zoom es cosa del Customer: la página se queda desplazada y recortada. Los
+  campos del alta los pinta esta app y van en `text-base`; los del inicio de
+  sesión los pinta Clerk con su propio CSS, por debajo de 16px, y no sólo el del
+  correo — también las casillas del código de verificación y el teléfono.
+
+  Aquí no sirve una clase de Tailwind pasada por `appearance`: Tailwind emite
+  sus utilidades dentro de `@layer utilities`, y una capa pierde siempre contra
+  el CSS sin capa que Clerk inyecta en el `<head>` en tiempo de ejecución. Por
+  eso la regla se escribe suelta y con `!important`, que es lo que gana a una
+  hoja de terceros que se monta después de esta.
+*/
+.cl-rootBox input {
+  font-size: 1rem !important;
+}
