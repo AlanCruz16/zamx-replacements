@@ -50,6 +50,49 @@ const spanVariants = {
 const transition: any = { delay: 0.1, type: 'spring', bounce: 0, duration: 0.6 };
 
 /**
+ * Si la pantalla admite que la etiqueta de la pestaña elegida se despliegue.
+ * Con ratón y sitio de sobra sí —ahí funciona y está bien—; con el dedo no,
+ * porque desplegarla hacía crecer el control de 46px a 90px dentro de una
+ * cabecera de 64px: se partía en dos filas, los iconos quedaban recortados por
+ * arriba y la etiqueta se derramaba sobre la página. Pasaba en cada pulsación.
+ *
+ * El ancho entra en la condición junto al puntero porque una ventana estrecha
+ * es estrecha con ratón también: medido en las cuatro pantallas objetivo, con
+ * las etiquetas desplegadas la cabecera desbordaba hasta 449px de ancho —la
+ * pestaña de la lista de Replacement Requests es la que más ocupa—. `flex-nowrap`
+ * impide que el control se parta en dos filas, pero lo que sobra tiene que ir a
+ * alguna parte; lo que arregla el desbordamiento es no desplegar la etiqueta.
+ *
+ * El corte es `40rem`, el `sm` de Tailwind. `DottedSurface` corta en 768px para
+ * decidir otra cosa —si monta o no una escena de WebGL—, y no hay motivo para
+ * que las dos preguntas compartan número: aquí el umbral es dónde deja de caber
+ * este control, medido, y allí es a partir de dónde compensa el coste.
+ *
+ * Empieza en `false` a propósito. El servidor no sabe con qué se le va a tocar,
+ * y de las dos respuestas posibles la que no despliega nada es la que cabe en
+ * las dos pantallas: un teléfono pinta lo correcto desde el primer fotograma y
+ * un escritorio gana la etiqueta al montar.
+ */
+function useExpandableLabels(): boolean {
+  const [showLabels, setShowLabels] = React.useState(false);
+
+  React.useEffect(() => {
+    // Donde no haya `matchMedia` —jsdom no lo trae— la respuesta prudente ya
+    // está puesta y no hay nada a lo que suscribirse.
+    if (typeof window.matchMedia !== 'function') return;
+
+    const query = window.matchMedia('(hover: hover) and (pointer: fine) and (min-width: 40rem)');
+    const read = () => setShowLabels(query.matches);
+    read();
+
+    query.addEventListener('change', read);
+    return () => query.removeEventListener('change', read);
+  }, []);
+
+  return showLabels;
+}
+
+/**
  * Este componente vino de fuera pintado con los tokens de shadcn/ui —«primary»,
  * «border», «muted», «background», «foreground»— que este proyecto no define.
  * No fallaban: no pintaban. Los separadores eran invisibles y la pestaña
@@ -64,6 +107,7 @@ export function ExpandableTabs({
   onChange,
 }: ExpandableTabsProps) {
   const [selected, setSelected] = React.useState<number | null>(null);
+  const showLabels = useExpandableLabels();
   const outsideClickRef = React.useRef<HTMLDivElement>(null!);
 
   useOnClickOutside(outsideClickRef, () => {
@@ -89,7 +133,10 @@ export function ExpandableTabs({
     <div
       ref={outsideClickRef}
       className={cn(
-        'flex flex-wrap items-center gap-2 rounded-2xl border bg-[var(--background)] p-1 shadow-sm',
+        // `flex-nowrap` no es decoración: es lo que impide que el control se
+        // parta en dos filas dentro de la cabecera. Aunque mañana alguien
+        // cambie el tamaño de las pestañas, el fallo no puede volver por ahí.
+        'flex flex-nowrap items-center gap-2 rounded-2xl border bg-[var(--background)] p-1 shadow-sm',
         className
       )}
     >
@@ -105,11 +152,15 @@ export function ExpandableTabs({
             variants={buttonVariants}
             initial={false}
             animate="animate"
-            custom={selected === index}
+            custom={showLabels && selected === index}
             onClick={() => handleSelect(index)}
             transition={transition}
+            // El nombre va siempre, se vea la etiqueta o no: sin él, en una
+            // pantalla táctil la pestaña no es más que un dibujo sin nombre
+            // para quien no puede verlo.
+            aria-label={tab.title}
             className={cn(
-              'relative flex items-center rounded-xl px-4 py-2 text-sm font-medium transition-colors duration-300',
+              'relative flex shrink-0 items-center rounded-xl px-4 py-2 text-sm font-medium transition-colors duration-300',
               selected === index
                 ? cn('bg-gray-100 dark:bg-gray-800', activeColor)
                 : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'
@@ -117,7 +168,7 @@ export function ExpandableTabs({
           >
             <Icon size={20} />
             <AnimatePresence initial={false}>
-              {selected === index && (
+              {showLabels && selected === index && (
                 <motion.span
                   variants={spanVariants}
                   initial="initial"
