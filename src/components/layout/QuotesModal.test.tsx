@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { act, useState } from 'react';
 import { montar } from '@/test/render-component';
 import { LANGUAGES, messagesFor, type Language } from '@/lib/messages';
 import { distinctivePhrases, otherLanguage } from '@/test/languages';
@@ -118,5 +119,157 @@ describe('la lista de Replacement Requests', () => {
     expect(spanish).toContain('2026');
     expect(english).toContain('2026');
     expect(spanish).not.toBe(english);
+  });
+});
+
+/**
+ * El panel como diálogo (ticket 09 de «usable-on-a-phone»).
+ *
+ * Un anfitrión con estado, en vez de montar el panel ya abierto: abrir y cerrar
+ * es justo lo que hay que probar, y el botón que lo abre es también el sitio al
+ * que el foco tiene que volver. Nada de esto mira dentro del componente —se
+ * pulsa, se teclea y se lee lo que el navegador dice después.
+ */
+
+function pulsar(elemento: HTMLElement) {
+  act(() => {
+    elemento.click();
+  });
+}
+
+/** Teclear donde está el foco, que es por donde llega la tecla de verdad. */
+function teclear(key: string) {
+  act(() => {
+    (document.activeElement ?? document.body).dispatchEvent(
+      new KeyboardEvent('keydown', { key, bubbles: true })
+    );
+  });
+}
+
+function buscar<T extends HTMLElement>(raiz: ParentNode, selector: string, queEs: string): T {
+  const encontrado = raiz.querySelector<T>(selector);
+  if (!encontrado) throw new Error(`No hay ${queEs} en la pantalla`);
+  return encontrado;
+}
+
+function hayDialogo(container: HTMLElement): boolean {
+  return container.querySelector('[role="dialog"]') !== null;
+}
+
+function dialogo(container: HTMLElement): HTMLElement {
+  return buscar(container, '[role="dialog"]', 'ningún diálogo');
+}
+
+/** El botón que abre el panel, que es también de dónde viene el foco. */
+function abridor(container: HTMLElement): HTMLButtonElement {
+  return buscar<HTMLButtonElement>(container, '[data-testid="abrir"]', 'ningún botón que abra');
+}
+
+/**
+ * El velo de detrás del panel. Se reconoce por lo que declara de sí mismo —que
+ * no hay nada que leer en él— y no por una marca puesta para la prueba. Que sea
+ * además el hermano del diálogo se comprueba aquí: sin eso, cualquier envoltorio
+ * decorativo futuro se llevaría en silencio la prueba de «tocar fuera».
+ */
+function velo(container: HTMLElement): HTMLElement {
+  const encontrado = buscar(container, 'div[aria-hidden="true"]', 'ningún velo');
+  if (encontrado.nextElementSibling !== dialogo(container)) {
+    throw new Error('El primer elemento oculto de la pantalla no es el velo del diálogo');
+  }
+  return encontrado;
+}
+
+async function montarAnfitrion() {
+  stubQueries('es', [QUOTE]);
+  const { default: QuotesModal } = await import('./QuotesModal');
+
+  function Anfitrion() {
+    const [abierto, setAbierto] = useState(false);
+    return (
+      <>
+        <button data-testid="abrir" onClick={() => setAbierto(true)}>
+          Abrir
+        </button>
+        <QuotesModal isOpen={abierto} onClose={() => setAbierto(false)} />
+      </>
+    );
+  }
+
+  const container = montar(<Anfitrion />);
+  return { container, abrir: () => pulsar(abridor(container)) };
+}
+
+describe('el panel de Replacement Requests como diálogo', () => {
+  test('se anuncia como diálogo y dice cómo se llama', async () => {
+    const { container, abrir } = await montarAnfitrion();
+    abrir();
+
+    const panel = dialogo(container);
+    expect(panel.getAttribute('aria-modal')).toBe('true');
+
+    const nombre = document.getElementById(panel.getAttribute('aria-labelledby') ?? '');
+    expect(nombre?.textContent).toBe(messagesFor('es').quotes.title);
+  });
+
+  test('Escape lo cierra', async () => {
+    const { container, abrir } = await montarAnfitrion();
+    abrir();
+    expect(hayDialogo(container)).toBe(true);
+
+    teclear('Escape');
+    expect(hayDialogo(container)).toBe(false);
+  });
+
+  test('el botón de cerrar lo cierra', async () => {
+    const { container, abrir } = await montarAnfitrion();
+    abrir();
+
+    pulsar(
+      buscar(
+        container,
+        `[aria-label="${messagesFor('es').quotes.close}"]`,
+        'ningún botón de cerrar'
+      )
+    );
+    expect(hayDialogo(container)).toBe(false);
+  });
+
+  test('tocar fuera lo cierra', async () => {
+    const { container, abrir } = await montarAnfitrion();
+    abrir();
+
+    pulsar(velo(container));
+    expect(hayDialogo(container)).toBe(false);
+  });
+
+  test('el foco entra al abrirse y vuelve a donde estaba al cerrarse', async () => {
+    const { container, abrir } = await montarAnfitrion();
+    abridor(container).focus();
+    abrir();
+
+    expect(dialogo(container).contains(document.activeElement)).toBe(true);
+
+    teclear('Escape');
+    expect(document.activeElement).toBe(abridor(container));
+  });
+
+  /**
+   * La única de estas pruebas que mira un estilo, y a propósito: jsdom no
+   * desplaza nada, así que «la página de detrás está quieta» no se puede
+   * observar de otro modo. Es el mismo trato que las medidas de la guía de la
+   * placa en el ticket 08 —ahí el atributo *es* el contrato, y aquí el estilo
+   * del `body` es lo que el panel promete a la pantalla que deja detrás—. Si
+   * mañana el bloqueo se hace con `position: fixed`, esta prueba hay que
+   * reescribirla; se prefiere eso a no tener ninguna.
+   */
+  test('la página de detrás no se desplaza mientras está abierto', async () => {
+    const { abrir } = await montarAnfitrion();
+    const antes = document.body.style.overflow;
+
+    abrir();
+    expect(document.body.style.overflow).toBe('hidden');
+
+    teclear('Escape');
+    expect(document.body.style.overflow).toBe(antes);
   });
 });
