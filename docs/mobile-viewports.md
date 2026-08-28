@@ -35,7 +35,10 @@ Three, and all three are the Customer's:
   of the page content behind it.
 - Nothing that does not fit is unreachable — if it overflows, it scrolls.
 - Nothing runs under the notch, the rounded corners or the home indicator, in either orientation.
-- Every control a thumb has to hit is at least 44px.
+- Every control a thumb has to hit is at least 44px. Since ticket 10 the target and the drawing are
+  not the same box: the `touch-target` class puts a 44px pseudo-element centred over the control, so
+  in DevTools measure the `::after` rectangle, not the button's — the button still measures what it
+  always did.
 - The header keeps its height when a navigation control is tapped.
 
 ## Measuring honestly

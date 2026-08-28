@@ -4,6 +4,7 @@ import { LANGUAGES, messagesFor, type Language } from '@/lib/messages';
 import { distinctivePhrases, otherLanguage } from '@/test/languages';
 import { rememberLanguage } from '@/lib/language-preference';
 import { getFunctionName } from 'convex/server';
+import { TOUCH_TARGET } from '@/lib/touch-target';
 
 /**
  * La pantalla de chat, en los dos idiomas.
@@ -398,5 +399,24 @@ describe('la pantalla de chat cuando algo por debajo se cae', () => {
 
     window.localStorage.clear();
     consola.mockRestore();
+  });
+});
+
+/**
+ * El botón de enviar (ticket 10 de «usable-on-a-phone»). Se dibujaba —y se
+ * sigue dibujando— como un círculo de 42px, dos por debajo del mínimo; lo que
+ * cambia es el área, no el círculo.
+ *
+ * Cuánto mide el área la vigila `touch-target.test.ts` sobre la hoja de
+ * estilos: jsdom no aplica Tailwind, así que aquí lo único observable es que el
+ * control lleve la clase.
+ */
+describe('el botón de enviar', () => {
+  test('se puede acertar con el pulgar', async () => {
+    const container = await render('es');
+
+    const enviar = container.querySelector('button[type="submit"]');
+    expect(enviar).not.toBeNull();
+    expect(enviar?.classList.contains(TOUCH_TARGET)).toBe(true);
   });
 });

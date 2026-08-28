@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { useOnClickOutside } from 'usehooks-ts';
 import { cn } from '@/lib/utils';
 import { LucideIcon } from 'lucide-react';
+import { TOUCH_TARGET } from '@/lib/touch-target';
 
 interface Tab {
   title: string;
@@ -136,6 +137,13 @@ export function ExpandableTabs({
         // `flex-nowrap` no es decoración: es lo que impide que el control se
         // parta en dos filas dentro de la cabecera. Aunque mañana alguien
         // cambie el tamaño de las pestañas, el fallo no puede volver por ahí.
+        //
+        // El `gap-2` tampoco: una pestaña se dibuja a 36px y se pulsa a 44px
+        // (ticket 10), así que su área se sale 4px por cada lado. Ocho de hueco
+        // es exactamente lo que hace falta para que dos pestañas contiguas se
+        // toquen sin solaparse; con menos, un pulgar en el borde pulsaría la de
+        // al lado. En la barra van además con separador de por medio, pero eso
+        // lo decide quien pone las pestañas y aquí no se puede dar por hecho.
         'flex flex-nowrap items-center gap-2 rounded-2xl border bg-[var(--background)] p-1 shadow-sm',
         className
       )}
@@ -161,6 +169,10 @@ export function ExpandableTabs({
             aria-label={tab.title}
             className={cn(
               'relative flex shrink-0 items-center rounded-xl px-4 py-2 text-sm font-medium transition-colors duration-300',
+              // Una pestaña se dibuja a 36×36 y se pulsa a 44×44. El resaltado
+              // es el que era —crecerlo cambiaría el dibujo de la cabecera—; lo
+              // que crece es el área. Es el control que más se toca de la app.
+              TOUCH_TARGET,
               selected === index
                 ? cn('bg-gray-100 dark:bg-gray-800', activeColor)
                 : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-100'

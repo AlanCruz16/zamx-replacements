@@ -3,6 +3,7 @@ import { act, useState } from 'react';
 import { montar } from '@/test/render-component';
 import { LANGUAGES, messagesFor, type Language } from '@/lib/messages';
 import { distinctivePhrases, otherLanguage } from '@/test/languages';
+import { TOUCH_TARGET } from '@/lib/touch-target';
 
 /**
  * La lista de Replacement Requests del Customer, en los dos idiomas.
@@ -271,5 +272,38 @@ describe('el panel de Replacement Requests como diálogo', () => {
 
     teclear('Escape');
     expect(document.body.style.overflow).toBe(antes);
+  });
+});
+
+/**
+ * Los dos controles del panel que se pulsan con el pulgar (ticket 10 de
+ * «usable-on-a-phone»). Se miden después del ticket 09 porque es ése el que les
+ * dio su forma final: el de cerrar se dibujaba a 36×36 y el enlace al Quote
+ * Document a 32px de alto.
+ *
+ * Lo que se afirma es que el control lleva la clase que agranda su área. Cuánto
+ * agranda —y que no mueve el dibujo— lo vigila `touch-target.test.ts`, que lee
+ * la hoja de estilos; jsdom no aplica Tailwind y no hay aquí ninguna medida que
+ * leer.
+ */
+describe('los controles del panel se aciertan con el pulgar', () => {
+  test('el botón de cerrar', async () => {
+    const { container, abrir } = await montarAnfitrion();
+    abrir();
+
+    const cerrar = buscar(
+      container,
+      `[aria-label="${messagesFor('es').quotes.close}"]`,
+      'ningún botón de cerrar'
+    );
+    expect(cerrar.classList.contains(TOUCH_TARGET)).toBe(true);
+  });
+
+  test('el enlace al Quote Document', async () => {
+    const { container, abrir } = await montarAnfitrion();
+    abrir();
+
+    const enlace = buscar(container, 'a[href^="/api/download-quote"]', 'ningún enlace al PDF');
+    expect(enlace.classList.contains(TOUCH_TARGET)).toBe(true);
   });
 });

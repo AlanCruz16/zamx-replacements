@@ -25,6 +25,7 @@ import { messagesFor, resolveLanguage, type Language } from '@/lib/messages';
 import { lastKnownLanguage, rememberLanguage } from '@/lib/language-preference';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
 import { useComposerInset } from '@/components/chat/composer-inset';
+import { TOUCH_TARGET } from '@/lib/touch-target';
 
 /**
  * Lo que se pinta mientras Convex contesta quién es el Customer y qué decía —y
@@ -458,7 +459,10 @@ function ChatDashboard({
                 <button
                   type="submit"
                   disabled={isLoading || !inputValue.trim()}
-                  className="p-3 bg-[var(--color-brand-blue)] hover:bg-[var(--color-brand-light)] text-white rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center"
+                  /* El círculo mide 42px y se queda como está —crecerlo lo
+                     sacaría del hueco que le deja el campo—; el área llega a
+                     44px por encima de él. */
+                  className={`${TOUCH_TARGET} p-3 bg-[var(--color-brand-blue)] hover:bg-[var(--color-brand-light)] text-white rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center`}
                 >
                   <Send size={18} className="ml-0.5" />
                 </button>

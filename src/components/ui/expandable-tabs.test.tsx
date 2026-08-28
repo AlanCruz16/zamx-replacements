@@ -4,6 +4,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Globe, Home } from 'lucide-react';
 import { ExpandableTabs, type TabItem } from './expandable-tabs';
+import { TOUCH_TARGET } from '@/lib/touch-target';
 
 /**
  * Las pestañas de la barra de navegación, pulsadas de verdad bajo jsdom.
@@ -163,5 +164,17 @@ describe('ExpandableTabs', () => {
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith(INDICE_IDIOMA);
+  });
+
+  test('cada pestaña se puede acertar con el pulgar', () => {
+    const onChange = vi.fn();
+    const container = montarPestanas(onChange, { admiteEtiquetas: false });
+
+    // El resaltado sigue midiendo 36px —el dibujo no cambia—; lo que llega a
+    // 44px es el área, que es lo que se pulsa. Cuánto mide lo vigila
+    // `touch-target.test.ts`.
+    for (const boton of botones(container)) {
+      expect(boton.classList.contains(TOUCH_TARGET)).toBe(true);
+    }
   });
 });

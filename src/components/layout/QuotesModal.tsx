@@ -7,6 +7,7 @@ import { quoteDocumentLines } from '@/lib/quote-document';
 import { outcomeBadge, type BadgeTone } from '@/lib/outcome-badge';
 import { formatCurrency, formatDateTime, messagesFor, resolveLanguage } from '@/lib/messages';
 import { X, FileText, Clock, CheckCircle, AlertCircle, Calendar, Download } from 'lucide-react';
+import { TOUCH_TARGET } from '@/lib/touch-target';
 
 /** La pintura de cada tono. La decisión de qué tono toca vive en `outcomeBadge`. */
 const TONE_STYLES: Record<BadgeTone, { bg: string; icon: React.ReactNode }> = {
@@ -115,7 +116,9 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
           <button
             onClick={onClose}
             aria-label={t.close}
-            className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+            /* Se dibuja a 36×36 y se pulsa a 44×44: el redondel del `hover` es
+               el que era, y lo que llega al mínimo es el área. */
+            className={`${TOUCH_TARGET} p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors`}
           >
             <X size={20} />
           </button>
@@ -211,7 +214,9 @@ export default function QuotesModal({ isOpen, onClose }: QuotesModalProps) {
                           href={`/api/download-quote?quoteId=${quote.requestId}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 rounded-lg text-sm font-medium transition-colors border border-blue-200 dark:border-blue-800/50"
+                          /* El enlace mide 32px de alto y no puede crecer sin
+                             desequilibrar la fila del total; el área sí. */
+                          className={`${TOUCH_TARGET} flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 rounded-lg text-sm font-medium transition-colors border border-blue-200 dark:border-blue-800/50`}
                         >
                           <Download size={14} />
                           {t.viewPdf}
