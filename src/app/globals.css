@@ -25,6 +25,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+  Un tirón de más no recarga la página (ticket 08 de «usable-on-a-phone»).
+
+  La conversación se desplaza con el documento entero, así que al llegar arriba
+  el sobredesplazamiento es del navegador, y en un teléfono eso es el gesto de
+  recargar. La pantalla siembra sus mensajes una sola vez, al montarse: recargar
+  por accidente es perder el sitio en la conversación. `contain` corta la
+  propagación —y con ella el gesto— sin quitar el rebote elástico de iOS, que es
+  sólo estética del aparato.
+
+  Va en `html, body` y no en la pantalla del chat porque quien sobredesplaza es
+  el elemento que desplaza, y en las tres pantallas del Customer ése es el
+  documento: no hay forma de escribirlo más estrecho sin marcar el `body` por
+  ruta. Alcanza a las otras dos, y en ninguna sobra —recargar por un gesto
+  tampoco es lo que se quiere ni dándose de alta ni con el panel abierto.
+*/
+html,
+body {
+  overscroll-behavior-y: contain;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

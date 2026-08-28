@@ -205,8 +205,19 @@ function ChatDashboard({
   // lo lee el contenido de debajo (ticket 05).
   const { composerRef, reserved } = useComposerInset();
 
+  /**
+   * Que la respuesta recién llegada quede a la vista, y no debajo del
+   * compositor (ticket 08 de «usable-on-a-phone»).
+   *
+   * El final de la conversación y el final de la pantalla no son el mismo
+   * sitio: el compositor flota fijo sobre los últimos `--composer-inset`
+   * píxeles. `block: 'end'` alinea el final del hilo con el borde de abajo, y
+   * el margen de desplazamiento del centinela levanta ese borde justo lo que el
+   * compositor ocupa: el mismo valor único del ticket 05, no una segunda
+   * estimación.
+   */
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages]);
 
   // Toda la copia de la pantalla sale del mismo módulo y del mismo idioma que
@@ -327,8 +338,27 @@ function ChatDashboard({
                   </div>
                 )}
 
+                {/*
+                  Que una referencia larga se quede dentro de su burbuja
+                  (ticket 08 de «usable-on-a-phone»).
+
+                  `break-words` porque una referencia pegada puede no traer
+                  ningún punto por donde partirla: los números de parte de esta
+                  casa —175168/A01, GR45C-ZID.GG.CR— rompen solos por sus
+                  guiones y sus barras, pero lo que el Customer copia de un
+                  correo no tiene por qué. Sin esto el texto se salía de la
+                  burbuja y con él la página, que se desplazaba de lado. La
+                  propiedad se hereda, así que lo que pinte `MessagePart` debajo
+                  —el Markdown del modelo incluido— rompe igual, salvo lo que ya
+                  se desplaza por su cuenta: los bloques de código y las tablas.
+
+                  `min-w-0` porque la burbuja es un elemento flex, y un elemento
+                  flex no encoge por debajo de su contenido mínimo salvo que se
+                  le diga: sin esto, la palabra sin cortes marca un suelo de
+                  ancho y el `max-w-[85%]` no llega a aplicarse.
+                */}
                 <div
-                  className={`max-w-[85%] rounded-2xl px-5 py-3.5 text-[15px] md:text-[16px] leading-relaxed shadow-sm
+                  className={`max-w-[85%] min-w-0 break-words rounded-2xl px-5 py-3.5 text-[15px] md:text-[16px] leading-relaxed shadow-sm
                     ${
                       m.role === 'user'
                         ? 'bg-[var(--color-brand-blue)] text-white'
@@ -372,7 +402,7 @@ function ChatDashboard({
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} className="scroll-mb-[var(--composer-inset)]" />
           </div>
         )}
 
