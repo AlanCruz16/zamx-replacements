@@ -93,12 +93,20 @@ export default defineSchema({
    * identificador llega dentro de la salida de una herramienta, y si no nombra
    * un registro de este Customer no se apunta—, y una conversación cerrada sin
    * puntero sigue estando cerrada.
+   *
+   * `abandonedAt` es la otra manera de terminar una conversación: el Customer se
+   * salió de ella sin enviar nada. Se apunta en vez de borrarla porque lo que se
+   * dijo ahí sigue siendo suyo; lo que cambia es que deja de ser la actual, así
+   * que la pantalla ya no la resiembra y el mensaje siguiente abre otra. Es
+   * distinto de `submittedAt` —ahí hay una Replacement Request y aquí no—, y por
+   * eso son dos campos y no un estado con dos motivos.
    */
   chat_sessions: defineTable({
     userId: v.id('users'),
     lastMessageAt: v.number(),
     submittedAt: v.optional(v.number()),
     submittedQuoteId: v.optional(v.id('quotes')),
+    abandonedAt: v.optional(v.number()),
   }).index('by_user_id', ['userId']),
 
   /**

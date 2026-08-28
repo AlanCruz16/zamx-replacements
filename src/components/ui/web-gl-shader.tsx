@@ -2,8 +2,31 @@
 
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { cappedPixelRatio, useDecorativeBackground } from '@/lib/decorative-motion';
 
+/**
+ * El fondo de las pantallas de acceso (ticket 11 de «usable-on-a-phone»).
+ *
+ * Es un fragment shader de precisión alta a pantalla completa, y estaba puesto
+ * sin condiciones y a la densidad del aparato: en un teléfono 3× son unos tres
+ * millones de píxeles de trabajo por fotograma, en la primerísima pantalla que
+ * carga cualquiera, pagados en batería y en calor antes de que el Customer haya
+ * hecho nada. El otro fondo de este código ya se apagaba por debajo del
+ * breakpoint; éste no llegó a recibir la misma regla, y ahora la comparten:
+ * `useDecorativeBackground` la dice una sola vez.
+ *
+ * Donde sí corre, la densidad va con tope. El coste de este shader va con el
+ * cuadrado de la densidad y lo que pinta es un degradado sin bordes, que no se
+ * ve mejor por rasterizarlo a 3×.
+ *
+ * Esto es adorno, no fondo: el negro sobre el que se lee la pantalla de acceso
+ * lo pinta ahora la pantalla misma, porque si no un teléfono —donde esto no se
+ * monta— se quedaba con el wordmark blanco sobre el fondo claro del `body`. Por
+ * eso el lienzo va en `z-0` y no en `-z-10`: por detrás de todo quedaría
+ * también por detrás de ese negro, que es quien lo taparía.
+ */
 export function WebGLShader() {
+  const backgroundEnabled = useDecorativeBackground();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<{
     scene: THREE.Scene | null;
@@ -63,7 +86,7 @@ export function WebGLShader() {
     const initScene = () => {
       refs.scene = new THREE.Scene();
       refs.renderer = new THREE.WebGLRenderer({ canvas, alpha: true });
-      refs.renderer.setPixelRatio(window.devicePixelRatio);
+      refs.renderer.setPixelRatio(cappedPixelRatio(window.devicePixelRatio));
       refs.renderer.setClearColor(new THREE.Color(0x000000));
 
       refs.camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, -1);
@@ -130,7 +153,12 @@ export function WebGLShader() {
       }
       refs.renderer?.dispose();
     };
-  }, []);
+    // `backgroundEnabled` está en las dependencias porque el canvas no existe
+    // hasta que vale `true`: sin él el efecto correría una vez, sin lienzo, y no
+    // volvería.
+  }, [backgroundEnabled]);
 
-  return <canvas ref={canvasRef} className="fixed top-0 left-0 w-full h-full block -z-10" />;
+  if (!backgroundEnabled) return null;
+
+  return <canvas ref={canvasRef} className="fixed top-0 left-0 w-full h-full block z-0" />;
 }

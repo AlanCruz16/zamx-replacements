@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { montar } from '@/test/render-component';
 import { LANGUAGES, messagesFor, type Language } from '@/lib/messages';
 import { distinctivePhrases, otherLanguage } from '@/test/languages';
+import { rememberLanguage } from '@/lib/language-preference';
+import { getFunctionName } from 'convex/server';
+import { TOUCH_TARGET } from '@/lib/touch-target';
 
 /**
  * La pantalla de chat, en los dos idiomas.
@@ -16,13 +19,21 @@ import { distinctivePhrases, otherLanguage } from '@/test/languages';
  * pinta de verdad.
  */
 
-const { useQuery, useChat, push } = vi.hoisted(() => ({
-  useQuery: vi.fn(),
-  useChat: vi.fn(),
-  push: vi.fn(),
-}));
+const { useQuery, useConvexAuth, useMutation, abandonConversation, useChat, push } = vi.hoisted(
+  () => {
+    const abandonConversation = vi.fn(async () => null);
+    return {
+      useQuery: vi.fn(),
+      useConvexAuth: vi.fn(),
+      useMutation: vi.fn(() => abandonConversation),
+      abandonConversation,
+      useChat: vi.fn(),
+      push: vi.fn(),
+    };
+  }
+);
 
-vi.mock('convex/react', () => ({ useQuery }));
+vi.mock('convex/react', () => ({ useQuery, useConvexAuth, useMutation }));
 vi.mock('@ai-sdk/react', () => ({ useChat }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 vi.mock('@/components/layout/Navbar', () => ({ default: () => null }));
@@ -49,21 +60,70 @@ function chatState(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function render(language: Language, chat = chatState()) {
-  // Primero el Customer, después su conversación guardada (ticket 21): la
-  // pantalla espera a las dos antes de montar el chat.
-  useQuery
-    .mockReturnValueOnce({
-      fullName: 'Ana Cliente',
-      companyName: 'Refrigeración del Norte',
-      clerkId: 'user_ana',
-      preferredLanguage: language,
-    })
-    .mockReturnValueOnce(null);
+/** El Customer que la pantalla da por sentado, en el idioma que se le pida. */
+function customer(language: Language) {
+  return {
+    fullName: 'Ana Cliente',
+    companyName: 'Refrigeración del Norte',
+    clerkId: 'user_ana',
+    preferredLanguage: language,
+  };
+}
+
+/**
+ * Lo que `useConvexAuth` contesta. Por defecto, el handshake ya terminado y con
+ * sesión: es el estado en el que está la pantalla en cuanto arranca del todo, y
+ * el que dan por sentado todas las pruebas que no dicen otra cosa.
+ */
+function authState(overrides: Partial<AuthState> = {}): AuthState {
+  return { isLoading: false, isAuthenticated: true, ...overrides };
+}
+
+type AuthState = { isLoading: boolean; isAuthenticated: boolean };
+
+type Screen = {
+  user?: unknown;
+  conversation?: unknown;
+  auth?: AuthState;
+  chat?: ReturnType<typeof chatState>;
+};
+
+/**
+ * La pantalla con sus dos consultas puestas a mano, para poder pararla en un
+ * instante concreto del arranque y no sólo en el que ya lo tiene todo.
+ *
+ * Cada consulta se responde por *cuál* es y no por el orden en que se pidió: el
+ * orden aguanta un render y se rompe en el siguiente —el efecto del onboarding
+ * provoca uno—, y al romperse devolvería `undefined`, que la pantalla lee como
+ * «todavía cargando». Una regresión de verdad se leería entonces como una
+ * prueba en verde.
+ *
+ * Se reconoce por el nombre y no por la referencia porque `api` es un proxy que
+ * fabrica un objeto nuevo en cada acceso: `api.users.current` nunca es igual a
+ * sí mismo. El nombre —`users:current`— sí es estable.
+ */
+async function renderScreen({
+  user,
+  conversation,
+  auth = authState(),
+  chat = chatState(),
+}: Screen) {
+  useConvexAuth.mockReturnValue(auth);
+  useQuery.mockImplementation((reference: Parameters<typeof getFunctionName>[0]) => {
+    const name = getFunctionName(reference);
+    if (name === 'users:current') return user;
+    if (name === 'chat:currentConversation') return conversation;
+    throw new Error(`La pantalla pidió \`${name}\`, que esta prueba no conoce.`);
+  });
   useChat.mockReturnValue(chat);
 
   const { default: Dashboard } = await import('./page');
   return montar(<Dashboard />);
+}
+
+/** La pantalla ya arrancada del todo: el Customer puesto y sin nada guardado. */
+async function render(language: Language, chat = chatState()) {
+  return renderScreen({ user: customer(language), conversation: null, chat });
 }
 
 /**
@@ -172,5 +232,191 @@ describe('la pantalla de chat', () => {
     expect(container.textContent).not.toContain(messagesFor(otro).chat.startNewConversation);
     // Y la tarjeta del envío, que es una pieza aparte, va en el mismo idioma.
     expect(container.textContent).toContain(messagesFor(language).chat.submittedTitle);
+  });
+
+  /**
+   * Empezar otra es empezar otra de verdad: si la pantalla sólo se vaciara, la
+   * consulta que la resiembra (ticket 21) devolvería a la anterior en la carga
+   * siguiente. Por eso el servidor se entera antes que la pantalla.
+   */
+  test('empezar otra conversación abandona la anterior antes de vaciar la pantalla', async () => {
+    const chat = chatState({
+      messages: [
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-submit_quote_request',
+              state: 'output-available',
+              output: { success: true, requestId: 'REQ-V59X9B' },
+            },
+          ],
+        },
+      ],
+    });
+    const container = await render('es', chat);
+    const t = messagesFor('es').chat;
+
+    const boton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes(t.startNewConversation)
+    );
+    boton?.click();
+
+    expect(abandonConversation).toHaveBeenCalled();
+    await vi.waitFor(() => expect(chat.setMessages).toHaveBeenCalledWith([]));
+  });
+});
+
+/**
+ * El arranque en frío (ticket 01 de «usable-on-a-phone»).
+ *
+ * En un teléfono el handshake de Clerk tarda lo suficiente como para que la
+ * pantalla se monte antes de tener credenciales. Ahí `currentConversation`
+ * lanzaba, y la excepción salía dentro del render: el Customer se quedaba en
+ * una página de error en vez de en la pantalla. Ahora contesta nada, igual que
+ * su vecina, y lo que se pinta mientras tanto es la espera que la pantalla ya
+ * tenía.
+ */
+describe('la pantalla de chat con credenciales frías', () => {
+  test('mientras las consultas están en vuelo se pinta la espera', async () => {
+    const container = await renderScreen({ user: undefined, conversation: undefined });
+
+    expect(container.querySelector('.animate-pulse')).not.toBeNull();
+    expect(container.textContent).not.toContain(messagesFor('es').chat.greeting);
+  });
+
+  /**
+   * El instante que de verdad ocurre en un teléfono, y el que la corrección de
+   * ticket 01 dejaba a medias. `ConvexProviderWithAuth` no llama a `setAuth`
+   * hasta que Clerk termina, así que durante el handshake las dos consultas se
+   * ejecutan *sin identidad* y contestan `null` —no `undefined`—. Con eso, el
+   * `user === null` de «no ha iniciado sesión» se disparaba y el Customer veía
+   * una página en blanco, sin barra y sin espera: la excepción se había
+   * convertido en un vacío, no en la carga que se pretendía.
+   *
+   * Quien distingue «todavía no sabemos» de «no hay sesión» es
+   * `useConvexAuth().isLoading`, no la respuesta de la consulta: contestar nada
+   * es lo que hacen ambos estados.
+   */
+  test('mientras el handshake está en vuelo se pinta la espera, no una página en blanco', async () => {
+    const container = await renderScreen({
+      user: null,
+      conversation: null,
+      auth: authState({ isLoading: true, isAuthenticated: false }),
+    });
+
+    expect(container.querySelector('.animate-pulse')).not.toBeNull();
+  });
+
+  /**
+   * El otro instante frío: Clerk ya dice quién es, pero la fila del Customer
+   * todavía no aterrizó por el webhook. `users.current` contesta `null` y es
+   * una espera, no una ausencia de sesión — así que se pinta igual.
+   */
+  test('con la sesión puesta y el Customer sin aterrizar se sigue esperando', async () => {
+    const container = await renderScreen({ user: null, conversation: null });
+
+    expect(container.querySelector('.animate-pulse')).not.toBeNull();
+  });
+
+  /**
+   * Y lo que la rama en blanco protegía de verdad se conserva: sin sesión, con
+   * el handshake ya terminado, la pantalla no pinta nada. El middleware ya lo
+   * impide; esto es el cinturón.
+   */
+  test('sin sesión y con el handshake terminado no se pinta nada', async () => {
+    const container = await renderScreen({
+      user: null,
+      conversation: null,
+      auth: authState({ isAuthenticated: false }),
+    });
+
+    expect(container.querySelector('.animate-pulse')).toBeNull();
+    expect(container.textContent).toBe('');
+  });
+
+  test('con la conversación resuelta en nada se monta el chat igual', async () => {
+    // Es lo que devuelve la consulta en cuanto llegan las credenciales de un
+    // Customer que todavía no ha hablado —y lo que devolvía antes de hablar era
+    // lo mismo, así que la pantalla no distingue este caso del de siempre.
+    const container = await renderScreen({ user: customer('es'), conversation: null });
+
+    expect(container.textContent).toContain(messagesFor('es').chat.greeting);
+  });
+});
+
+/**
+ * El cinturón (ticket 02 de «usable-on-a-phone»).
+ *
+ * `ChatErrorBoundary` tiene su propia prueba; lo que se comprueba aquí es que
+ * está puesto de verdad alrededor de esta pantalla, que es lo que decide si el
+ * próximo fallo cuesta un mensaje o la pantalla entera.
+ */
+describe('la pantalla de chat cuando algo por debajo se cae', () => {
+  test('una consulta que lanza deja el mensaje y su reintento, no una página muerta', async () => {
+    // React escribe por consola cada error que recoge una frontera: aquí es lo
+    // esperado.
+    const consola = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    useConvexAuth.mockReturnValue(authState());
+    useQuery.mockImplementation(() => {
+      throw new Error('la consulta de turno se cayó');
+    });
+    useChat.mockReturnValue(chatState());
+
+    const { default: Dashboard } = await import('./page');
+    const container = montar(<Dashboard />);
+
+    const t = messagesFor('es').chat;
+    expect(container.textContent).toContain(t.errorTitle);
+    expect(container.textContent).toContain(t.errorRetry);
+
+    consola.mockRestore();
+  });
+
+  /**
+   * El fallo del arranque en frío ocurre en el primer render, antes de que
+   * ninguna consulta haya contestado quién es el Customer: si el idioma saliera
+   * de ahí, un Customer que eligió inglés leería el error en español. Sale de lo
+   * último que se le conoció, que es lo único que hay a esa altura.
+   */
+  test('el mensaje va en el idioma que el Customer eligió la última vez', async () => {
+    const consola = vi.spyOn(console, 'error').mockImplementation(() => {});
+    rememberLanguage('en');
+
+    useConvexAuth.mockReturnValue(authState());
+    useQuery.mockImplementation(() => {
+      throw new Error('la consulta de turno se cayó');
+    });
+    useChat.mockReturnValue(chatState());
+
+    const { default: Dashboard } = await import('./page');
+    const container = montar(<Dashboard />);
+
+    expect(container.textContent).toContain(messagesFor('en').chat.errorTitle);
+    expect(container.textContent).not.toContain(messagesFor('es').chat.errorTitle);
+
+    window.localStorage.clear();
+    consola.mockRestore();
+  });
+});
+
+/**
+ * El botón de enviar (ticket 10 de «usable-on-a-phone»). Se dibujaba —y se
+ * sigue dibujando— como un círculo de 42px, dos por debajo del mínimo; lo que
+ * cambia es el área, no el círculo.
+ *
+ * Cuánto mide el área la vigila `touch-target.test.ts` sobre la hoja de
+ * estilos: jsdom no aplica Tailwind, así que aquí lo único observable es que el
+ * control lleve la clase.
+ */
+describe('el botón de enviar', () => {
+  test('se puede acertar con el pulgar', async () => {
+    const container = await render('es');
+
+    const enviar = container.querySelector('button[type="submit"]');
+    expect(enviar).not.toBeNull();
+    expect(enviar?.classList.contains(TOUCH_TARGET)).toBe(true);
   });
 });

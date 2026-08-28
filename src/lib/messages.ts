@@ -110,6 +110,16 @@ const es = {
     inputPlaceholder: 'Escribe un mensaje, modelo o número de parte...',
     genericError: 'No pudimos enviar tu mensaje. Vuelve a intentarlo.',
     startNewConversation: 'Empezar una conversación nueva',
+
+    /**
+     * Lo que se lee cuando algo por debajo de la pantalla falla de una forma
+     * que nadie previó (ticket 02). Va aquí, con el resto de la copia de la
+     * pantalla, porque es la misma pantalla: lo que cambia es que en vez de la
+     * conversación se lee por qué no está.
+     */
+    errorTitle: 'Algo salió mal en esta pantalla',
+    errorBody: 'No pudimos cargar tu conversación. Vuelve a intentarlo.',
+    errorRetry: 'Reintentar',
     copyright: '© 2026 ZAMX Replacements. Todos los derechos reservados.',
 
     /** El envío de la Replacement Request, dentro del hilo. */
@@ -316,6 +326,10 @@ const en: Messages = {
     inputPlaceholder: 'Type a message, model, or part number...',
     genericError: 'We could not send your message. Please try again.',
     startNewConversation: 'Start a new conversation',
+
+    errorTitle: 'Something went wrong on this screen',
+    errorBody: 'We could not load your conversation. Please try again.',
+    errorRetry: 'Try again',
     copyright: '© 2026 ZAMX Replacements. All rights reserved.',
 
     submitting: 'Submitting your replacement request...',

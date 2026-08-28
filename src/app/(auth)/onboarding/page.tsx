@@ -7,6 +7,11 @@ import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { messagesFor, resolveLanguage } from '@/lib/messages';
 
+// Los tres campos se pintan igual. `text-base` no es decorativo: iOS hace zoom
+// sobre cualquier campo cuya letra baje de 16px y no lo deshace solo.
+const CAMPO =
+  'w-full bg-black/20 border border-white/10 rounded-lg px-4 py-2.5 text-base text-white placeholder-white/40 focus:outline-none focus:border-brand-light focus:ring-1 focus:ring-brand-light transition-all';
+
 export default function OnboardingPage() {
   const router = useRouter();
   const user = useQuery(api.users.current);
@@ -88,7 +93,7 @@ export default function OnboardingPage() {
             required
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
-            className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-white/40 focus:outline-none focus:border-brand-light focus:ring-1 focus:ring-brand-light transition-all"
+            className={CAMPO}
             placeholder={t.fullNamePlaceholder}
           />
         </div>
@@ -103,7 +108,7 @@ export default function OnboardingPage() {
             required
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
-            className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-white/40 focus:outline-none focus:border-brand-light focus:ring-1 focus:ring-brand-light transition-all"
+            className={CAMPO}
             placeholder={t.companyPlaceholder}
           />
         </div>
@@ -118,7 +123,7 @@ export default function OnboardingPage() {
             type="tel"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            className="w-full bg-black/20 border border-white/10 rounded-lg px-4 py-2.5 text-white placeholder-white/40 focus:outline-none focus:border-brand-light focus:ring-1 focus:ring-brand-light transition-all"
+            className={CAMPO}
             placeholder={t.phonePlaceholder}
           />
         </div>

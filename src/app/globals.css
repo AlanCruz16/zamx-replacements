@@ -25,6 +25,27 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/*
+  Un tirón de más no recarga la página (ticket 08 de «usable-on-a-phone»).
+
+  La conversación se desplaza con el documento entero, así que al llegar arriba
+  el sobredesplazamiento es del navegador, y en un teléfono eso es el gesto de
+  recargar. La pantalla siembra sus mensajes una sola vez, al montarse: recargar
+  por accidente es perder el sitio en la conversación. `contain` corta la
+  propagación —y con ella el gesto— sin quitar el rebote elástico de iOS, que es
+  sólo estética del aparato.
+
+  Va en `html, body` y no en la pantalla del chat porque quien sobredesplaza es
+  el elemento que desplaza, y en las tres pantallas del Customer ése es el
+  documento: no hay forma de escribirlo más estrecho sin marcar el `body` por
+  ruta. Alcanza a las otras dos, y en ninguna sobra —recargar por un gesto
+  tampoco es lo que se quiere ni dándose de alta ni con el panel abierto.
+*/
+html,
+body {
+  overscroll-behavior-y: contain;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -33,5 +54,152 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+/*
+  El hueco que el aparato se reserva para sí —el notch, las esquinas redondeadas,
+  la barra de gestos— dicho una sola vez y en un sitio (ticket 04 de
+  «usable-on-a-phone»). Un navegador sin insets contesta 0px, así que estas
+  variables valen lo mismo en un escritorio: sumarlas no mueve nada allí.
+
+  Se leen desde las clases con `calc(... + var(--safe-bottom))`; `env()` no se
+  puede escribir dentro de un valor arbitrario de Tailwind porque los paréntesis
+  no sobreviven al parser de clases.
+*/
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+}
+
+/*
+  El sitio que el compositor del chat le quita al contenido que pasa por debajo
+  (ticket 05 de «usable-on-a-phone»). Quien manda es la medida real del
+  compositor, que `useComposerInset` publica sobre esta misma propiedad en
+  cuanto hay algo pintado que medir.
+
+  Esto es sólo el valor de partida: lo que vale en el servidor y en el primer
+  render, antes de que exista medida. Se queda un poco largo a propósito —el
+  compositor mide 218px en los teléfonos de la lista, donde la línea de copyright
+  ocupa dos renglones—, porque pasarse reserva hueco de más durante un fotograma
+  y quedarse corto tapa contenido.
+*/
+:root {
+  --composer-inset: calc(14rem + var(--safe-bottom));
+}
+
+/*
+  iOS hace zoom sobre cualquier campo cuya letra mida menos de 16px, y deshacer
+  ese zoom es cosa del Customer: la página se queda desplazada y recortada. Los
+  campos del alta los pinta esta app y van en `text-base`; los del inicio de
+  sesión los pinta Clerk con su propio CSS, por debajo de 16px, y no sólo el del
+  correo — también las casillas del código de verificación y el teléfono.
+
+  Aquí no sirve una clase de Tailwind pasada por `appearance`: Tailwind emite
+  sus utilidades dentro de `@layer utilities`, y una capa pierde siempre contra
+  el CSS sin capa que Clerk inyecta en el `<head>` en tiempo de ejecución. Por
+  eso la regla se escribe suelta y con `!important`, que es lo que gana a una
+  hoja de terceros que se monta después de esta.
+*/
+.cl-rootBox input {
+  font-size: 1rem !important;
+}
+
+/*
+  El área que hay que acertar con el pulgar, que no es la misma que se ve
+  (ticket 10 de «usable-on-a-phone»). El mínimo y su porqué están escritos en
+  `@/lib/touch-target`, que es lo que lee la comprobación que vigila este
+  bloque.
+
+  El pseudoelemento se centra sobre el control y se queda en 44px cuando el
+  control mide menos: la pestaña sigue midiendo 36px de resaltado y el botón de
+  enviar sigue siendo el mismo círculo. Va fuera del flujo —`absolute` sobre un
+  `relative` propio— para no empujar nada de alrededor, y sin fondo, porque no
+  hay nada que pintar; lo único que aporta es superficie que pulsar. Pulsarlo es
+  pulsar el control: un pseudoelemento no es un elemento aparte a efectos del
+  puntero.
+
+  Que dos áreas no se solapen no lo puede garantizar esta regla, porque depende
+  de cuánto separe a los controles quien los coloque. Dónde está escrito cada
+  caso: el de las pestañas, en `ExpandableTabs`, que es donde puede romperse; el
+  del botón de enviar, que va encima del campo de texto y le quita 1px por
+  arriba y otro por abajo de sus 58 —el campo se sigue tocando en todo lo demás,
+  y el botón ya estaba encima antes—; el de cerrar el panel y el del enlace al
+  Quote Document, que no tienen ningún vecino pulsable al lado. Medido en los
+  cuatro viewports de `docs/mobile-viewports.md`: ningún solape.
+*/
+@utility touch-target {
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 100%;
+    height: 100%;
+    min-width: 44px;
+    min-height: 44px;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/*
+  Menos movimiento, para quien se lo ha pedido a su aparato (ticket 11 de
+  «usable-on-a-phone»). Los dos fondos WebGL se apagan enteros desde
+  `@/lib/decorative-motion`, porque los pinta JavaScript y ninguna regla los
+  alcanza; lo que se apaga aquí es todo lo demás: el `fadeIn` de la bienvenida,
+  el rebote del indicador de escritura, el latido de la pantalla de carga y las
+  transiciones de las tarjetas.
+
+  Va contra el selector universal y no contra una lista de clases porque esas
+  animaciones no comparten ninguna: unas son utilidades de Tailwind y otra es un
+  estilo en línea. Enumerarlas dejaría fuera la que se escriba mañana.
+
+  0.01ms y no `none`: una animación anulada nunca llega a su fotograma final, y
+  la bienvenida arranca en `opacity: 0` con `forwards`, así que quitarla la
+  dejaría invisible. Terminarla al instante deja al Customer exactamente lo que
+  la animación iba a dejarle, sin el camino. La espera se pone a cero por lo
+  mismo: media décima de tarjetas en blanco no es «sin movimiento», es «tarde».
+
+  `!important` porque compite contra utilidades de Tailwind y contra estilos en
+  línea, y sin él pierde contra ambos.
+
+  Lo que se salva son los indicadores de progreso, que no son adorno: un
+  `animate-spin` y el latido de la pantalla de carga son la única señal de que
+  algo sigue en marcha. Congelarlos no le ahorra movimiento a nadie —le dice que
+  la app se ha colgado—, y quien pide menos movimiento pide justo eso, no menos
+  información. Lo que se ha pedido y esta regla concede es que no se mueva la
+  decoración; el resto de esta hoja se lo sigue quitando todo.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /*
+    Las duraciones son las de Tailwind para estas dos utilidades, repetidas aquí
+    porque `!important` sólo se le gana a `!important`: no hay forma de devolver
+    una propiedad a lo que valía sin volver a escribirla. Si Tailwind cambiara
+    las suyas, lo único que pasaría es que el giro y el latido irían a otro
+    ritmo — no que dejen de verse, que es lo que esta regla protege.
+  */
+  .animate-spin {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  .animate-pulse {
+    animation-duration: 2s !important;
+    animation-iteration-count: infinite !important;
   }
 }

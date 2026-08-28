@@ -1,6 +1,6 @@
 'use client';
 
-import { useQuery } from 'convex/react';
+import { useQuery, useConvexAuth, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Doc } from '../../convex/_generated/dataModel';
 import { findSubmission } from '../../convex/lib/chat';
@@ -21,12 +21,21 @@ import { DefaultChatTransport, type UIMessage } from 'ai';
 import { MessagePart } from '@/components/chat/MessagePart';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { messagesFor, resolveLanguage } from '@/lib/messages';
+import { messagesFor, resolveLanguage, type Language } from '@/lib/messages';
+import { lastKnownLanguage, rememberLanguage } from '@/lib/language-preference';
+import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
+import { useComposerInset } from '@/components/chat/composer-inset';
+import { TOUCH_TARGET } from '@/lib/touch-target';
+import { usePrefersReducedMotion } from '@/lib/decorative-motion';
 
-/** Lo que se pinta mientras Convex contesta quién es el Customer y qué decía. */
+/**
+ * Lo que se pinta mientras Convex contesta quién es el Customer y qué decía —y
+ * también mientras Clerk termina el handshake, que es cuando las consultas
+ * contestan nada por no haber todavía a quién contestarle.
+ */
 function Loading() {
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--background)]">
+    <div className="min-h-[100dvh] flex flex-col bg-[var(--background)]">
       <Navbar />
       <main className="flex-1 flex items-center justify-center">
         <div className="animate-pulse flex flex-col items-center gap-4">
@@ -39,6 +48,34 @@ function Loading() {
 }
 
 /**
+ * La pantalla, con su cinturón puesto (ticket 02 de «usable-on-a-phone»).
+ *
+ * Lo único que vive aquí arriba es lo que la frontera necesita y no puede
+ * pedirle a lo que protege: el idioma en el que redactar el mensaje si algo se
+ * cae, y la señal por la que darlo por caducado. Esa señal es el handshake:
+ * cuando `isAuthenticated` cambia, las credenciales acaban de llegar, que es
+ * exactamente la causa pasajera de la que un teléfono se ha de recuperar solo.
+ *
+ * El idioma se recibe de la propia pantalla en cuanto lo sabe. Leerlo aquí de
+ * la consulta del Customer dejaría el mensaje de error colgando de una consulta
+ * —la misma clase de pieza cuya caída la frontera existe para recoger—. Mientras
+ * la pantalla no lo diga se usa el último que se le conoció al Customer, porque
+ * el caso que más importa es justo el que la pantalla no llega a contar: si se
+ * cae en su primer render, el efecto que lo diría no ha corrido todavía, y un
+ * Customer que eligió inglés leería el error en español.
+ */
+export default function Dashboard() {
+  const { isAuthenticated } = useConvexAuth();
+  const [language, setLanguage] = useState<Language>(lastKnownLanguage);
+
+  return (
+    <ChatErrorBoundary language={language} resetKeys={[isAuthenticated]}>
+      <ChatScreen onLanguage={setLanguage} />
+    </ChatErrorBoundary>
+  );
+}
+
+/**
  * La pantalla espera a tener la conversación guardada antes de montar el chat
  * (ticket 21).
  *
@@ -47,10 +84,29 @@ function Loading() {
  * reanudada no aparecería nunca. Por eso el chat vive en un componente aparte y
  * aquí sólo se decide cuándo montarlo.
  */
-export default function Dashboard() {
+function ChatScreen({ onLanguage }: { onLanguage: (language: Language) => void }) {
   const user = useQuery(api.users.current);
   const conversation = useQuery(api.chat.currentConversation);
+  /**
+   * Quién distingue «todavía no sabemos» de «no hay sesión». Las consultas ya
+   * no lo dicen: desde ticket 01 ambas contestan nada en los dos casos, que es
+   * justo lo que impide que un render se caiga, y por lo mismo deja de servir
+   * para decidir qué pintar.
+   */
+  const { isLoading: authLoading, isAuthenticated } = useConvexAuth();
   const router = useRouter();
+
+  // El idioma que ha de usar la frontera de error si la pantalla se cae. Se le
+  // dice en cuanto se sabe, y no cuando ya haga falta: para entonces no habría
+  // pantalla a la que preguntárselo. Sólo cuando se sabe de verdad: sin Customer
+  // esto es el idioma por defecto, y anunciarlo pisaría el que se le conoció en
+  // la visita anterior.
+  const language = resolveLanguage(user?.preferredLanguage);
+  useEffect(() => {
+    if (!user) return;
+    onLanguage(language);
+    rememberLanguage(language);
+  }, [user, language, onLanguage]);
 
   // Onboarding loop check
   useEffect(() => {
@@ -59,14 +115,22 @@ export default function Dashboard() {
     }
   }, [user, router]);
 
-  // Still loading Convex data
-  if (user === undefined || conversation === undefined) {
+  // La espera: el handshake de Clerk todavía en vuelo, o alguna de las dos
+  // consultas sin contestar por primera vez.
+  if (authLoading || user === undefined || conversation === undefined) {
     return <Loading />;
   }
 
-  // Not logged in (middleware protects it, but just in case)
-  if (user === null) {
+  // Sin sesión, y ya sabiéndolo. El middleware lo impide; esto es el cinturón.
+  if (!isAuthenticated) {
     return null;
+  }
+
+  // Con sesión pero sin Customer todavía: la fila no ha aterrizado por el
+  // webhook. Es el otro instante frío y también es una espera — antes caía en
+  // la rama de arriba y dejaba al Customer mirando una página en blanco.
+  if (user === null) {
+    return <Loading />;
   }
 
   // Sin `key`: el chat se monta una vez y `useChat` lee estos mensajes sólo al
@@ -74,15 +138,21 @@ export default function Dashboard() {
   // devolviendo lo guardado, y re-sembrar con ello pisaría lo que el Customer
   // esté diciendo ahora mismo.
   return (
-    <ChatDashboard user={user} initialMessages={(conversation?.messages ?? []) as UIMessage[]} />
+    <ChatDashboard
+      user={user}
+      language={language}
+      initialMessages={(conversation?.messages ?? []) as UIMessage[]}
+    />
   );
 }
 
 function ChatDashboard({
   user,
+  language,
   initialMessages,
 }: {
   user: Doc<'users'>;
+  language: Language;
   initialMessages: UIMessage[];
 }) {
   const userRef = useRef(user);
@@ -113,6 +183,7 @@ function ChatDashboard({
   });
 
   const [inputValue, setInputValue] = useState('');
+  const abandonConversation = useMutation(api.chat.abandonCurrentConversation);
   const isLoading = status === 'streaming' || status === 'submitted';
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -132,15 +203,39 @@ function ChatDashboard({
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Lo que el compositor ocupa, dicho una sola vez: lo publica quien lo mide y
+  // lo lee el contenido de debajo (ticket 05).
+  const { composerRef, reserved } = useComposerInset();
+
+  /**
+   * Que la respuesta recién llegada quede a la vista, y no debajo del
+   * compositor (ticket 08 de «usable-on-a-phone»).
+   *
+   * El final de la conversación y el final de la pantalla no son el mismo
+   * sitio: el compositor flota fijo sobre los últimos `--composer-inset`
+   * píxeles. `block: 'end'` alinea el final del hilo con el borde de abajo, y
+   * el margen de desplazamiento del centinela levanta ese borde justo lo que el
+   * compositor ocupa: el mismo valor único del ticket 05, no una segunda
+   * estimación.
+   *
+   * El desplazamiento suave es movimiento, así que también se le pregunta al
+   * aparato (ticket 11). `scroll-behavior` en la hoja de estilos no alcanza a
+   * esto: una opción escrita en la llamada gana a la hoja. Sin suavizado el
+   * mensaje sigue quedando donde tiene que quedar; lo que se quita es el viaje.
+   */
+  const reducedMotion = usePrefersReducedMotion();
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({
+      behavior: reducedMotion ? 'auto' : 'smooth',
+      block: 'end',
+    });
+  }, [messages, reducedMotion]);
 
   // Toda la copia de la pantalla sale del mismo módulo y del mismo idioma que
   // el chatbot, el Quote Document y los correos (ticket 20). Antes cada frase
   // llevaba su propio condicional incrustado en el JSX, así que traducir la
-  // pantalla era acordarse de cada uno.
-  const language = resolveLanguage(user.preferredLanguage);
+  // pantalla era acordarse de cada uno. El idioma lo resuelve quien monta esta
+  // pieza, que es también quien se lo dice a la frontera de error.
   const t = messagesFor(language).chat;
 
   /**
@@ -152,18 +247,35 @@ function ChatDashboard({
    */
   const isSubmitted = findSubmission(messages) !== undefined;
 
-  /** Vacía la pantalla para empezar de cero. Lo enviado sigue guardado. */
-  const startNewConversation = () => {
+  /**
+   * Empezar de cero: la conversación que hubiera a medias se abandona y la
+   * pantalla se vacía. Lo dicho hasta aquí sigue guardado, sólo deja de ser la
+   * conversación actual.
+   *
+   * Primero el servidor y después la pantalla, no al revés. Vaciar antes de que
+   * la conversación deje de ser la actual sería enseñarle al Customer una
+   * pantalla limpia que la siguiente carga desharía: la consulta la resiembra
+   * (ticket 21), y volvería a estar dentro de la que creía haber dejado.
+   *
+   * Después de un envío no hay nada abierto que abandonar y la mutación no hace
+   * nada, que es lo que permite que sea el mismo camino para «Inicio» y para
+   * «nueva conversación» en vez de dos que hay que mantener de acuerdo.
+   */
+  const startNewConversation = async () => {
+    await abandonConversation({});
     setMessages([]);
     setInputValue('');
   };
 
   return (
-    <div className="min-h-screen flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0">
+    <div
+      className="min-h-[100dvh] flex flex-col selection:bg-[var(--color-brand-blue)] selection:text-white relative z-0"
+      style={reserved}
+    >
       <DottedSurface className="opacity-50 dark:opacity-30" />
-      <Navbar />
+      <Navbar onHome={startNewConversation} />
 
-      <main className="flex-1 flex flex-col pt-4 md:pt-8 px-4 pb-36 max-w-4xl mx-auto w-full">
+      <main className="flex-1 flex flex-col pt-4 md:pt-8 pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pb-[var(--composer-inset)] max-w-4xl mx-auto w-full">
         {messages.length === 0 ? (
           /* Welcome Section - Only visible when no messages exist */
           <div className="flex-1 flex flex-col items-center justify-center pt-8 md:pt-16">
@@ -237,8 +349,27 @@ function ChatDashboard({
                   </div>
                 )}
 
+                {/*
+                  Que una referencia larga se quede dentro de su burbuja
+                  (ticket 08 de «usable-on-a-phone»).
+
+                  `break-words` porque una referencia pegada puede no traer
+                  ningún punto por donde partirla: los números de parte de esta
+                  casa —175168/A01, GR45C-ZID.GG.CR— rompen solos por sus
+                  guiones y sus barras, pero lo que el Customer copia de un
+                  correo no tiene por qué. Sin esto el texto se salía de la
+                  burbuja y con él la página, que se desplazaba de lado. La
+                  propiedad se hereda, así que lo que pinte `MessagePart` debajo
+                  —el Markdown del modelo incluido— rompe igual, salvo lo que ya
+                  se desplaza por su cuenta: los bloques de código y las tablas.
+
+                  `min-w-0` porque la burbuja es un elemento flex, y un elemento
+                  flex no encoge por debajo de su contenido mínimo salvo que se
+                  le diga: sin esto, la palabra sin cortes marca un suelo de
+                  ancho y el `max-w-[85%]` no llega a aplicarse.
+                */}
                 <div
-                  className={`max-w-[85%] rounded-2xl px-5 py-3.5 text-[15px] md:text-[16px] leading-relaxed shadow-sm
+                  className={`max-w-[85%] min-w-0 break-words rounded-2xl px-5 py-3.5 text-[15px] md:text-[16px] leading-relaxed shadow-sm
                     ${
                       m.role === 'user'
                         ? 'bg-[var(--color-brand-blue)] text-white'
@@ -282,7 +413,7 @@ function ChatDashboard({
                 </div>
               </div>
             )}
-            <div ref={messagesEndRef} />
+            <div ref={messagesEndRef} className="scroll-mb-[var(--composer-inset)]" />
           </div>
         )}
 
@@ -305,7 +436,10 @@ function ChatDashboard({
       </main>
 
       {/* Floating Input */}
-      <div className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[var(--background)] via-[var(--background)] to-transparent pt-20 pb-8 px-4 pointer-events-none">
+      <div
+        ref={composerRef}
+        className="fixed bottom-0 left-0 w-full bg-gradient-to-t from-[var(--background)] via-[var(--background)] to-transparent pt-20 pb-[calc(2rem+var(--safe-bottom))] pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pointer-events-none"
+      >
         <div className="max-w-4xl mx-auto pointer-events-auto relative">
           {isSubmitted ? (
             /*
@@ -335,7 +469,10 @@ function ChatDashboard({
                 <button
                   type="submit"
                   disabled={isLoading || !inputValue.trim()}
-                  className="p-3 bg-[var(--color-brand-blue)] hover:bg-[var(--color-brand-light)] text-white rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center"
+                  /* El círculo mide 42px y se queda como está —crecerlo lo
+                     sacaría del hueco que le deja el campo—; el área llega a
+                     44px por encima de él. */
+                  className={`${TOUCH_TARGET} p-3 bg-[var(--color-brand-blue)] hover:bg-[var(--color-brand-light)] text-white rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-md flex items-center justify-center`}
                 >
                   <Send size={18} className="ml-0.5" />
                 </button>

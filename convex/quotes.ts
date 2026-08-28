@@ -318,23 +318,34 @@ export const getFullQuoteDetails = internalQuery({
 /**
  * La única superficie pública: las Replacement Requests del Customer que
  * pregunta. Devuelve una proyección, no el registro — ver `lib/customer_view.ts`.
+ *
+ * Devuelve la lista vacía mientras no haya todavía a quién contestarle: sin
+ * identidad de Clerk, o con una identidad cuyo Customer aún no aterrizó por el
+ * webhook. Antes lanzaba en esos dos instantes, y lanzar era el defecto — el
+ * mismo que se explica entero en `chat.ts:currentConversation`: una excepción
+ * levantada durante un render de React no es una decisión de acceso, es una
+ * caída. La regla no se ha aflojado: quien no se ha identificado sigue sin ver
+ * ninguna Replacement Request, y no ver ninguna no revela nada que lanzar
+ * ocultara. Lo que cambia es sólo el mecanismo, y con él las dos lecturas del
+ * Customer pasan a decir lo mismo ante la misma espera.
+ *
+ * Que hoy no se caiga por aquí lo hace el `{user && …}` del `Navbar`, que no
+ * monta `QuotesModal` hasta que `users.current` ha devuelto una fila. Eso es un
+ * guard, no una consulta segura: bastaba con mover la lista a cualquier sitio
+ * que pinte durante el handshake para volver a armar la caída.
  */
 export const getUserQuotes = query({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error('No autenticado');
-    }
+    if (!identity) return [];
 
     const user = await ctx.db
       .query('users')
       .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
       .unique();
 
-    if (!user) {
-      throw new Error('Usuario no encontrado');
-    }
+    if (!user) return [];
 
     const quotes = await ctx.db
       .query('quotes')

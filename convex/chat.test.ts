@@ -205,11 +205,41 @@ describe('un Customer reanuda su propia conversación', () => {
     ]);
   });
 
+  /**
+   * Antes esta lectura lanzaba `No autenticado`, y la afirmación era que
+   * lanzara. Cambia a propósito, y lo que la protegía se conserva entero: quien
+   * no se ha identificado sigue sin ver una sola conversación. Devolver nada no
+   * revela nada que lanzar ocultara —no hay conversación en la respuesta, ni
+   * pista de si existía—, así que la regla de acceso es la misma; lo único que
+   * cambia es cómo se dice.
+   *
+   * Y cómo se decía era el defecto. La pantalla monta esta consulta mientras el
+   * handshake de Clerk está en vuelo, es decir con credenciales todavía frías:
+   * la excepción salía dentro de un render de React, que no la trata como una
+   * negativa sino como una caída, y el Customer se quedaba en una página de
+   * error de la que ya no volvía. Contestando nada, la consulta queda en el
+   * mismo estado de espera que la pantalla ya sabe pintar —el mismo que usa su
+   * vecina `users.current`, que nunca lanzó—, y el render sobrevive hasta que
+   * llegan las credenciales.
+   */
   test('sin identidad de Clerk no se lee ninguna conversación', async () => {
     const t = convexTest(schema, modules);
     await seedCustomer(t, 'user_ana');
 
-    await expect(t.query(api.chat.currentConversation, {})).rejects.toThrow('No autenticado');
+    await expect(t.query(api.chat.currentConversation, {})).resolves.toBeNull();
+  });
+
+  /**
+   * El otro instante frío del mismo handshake: Clerk ya dice quién es el
+   * Customer, pero la fila que lo representa todavía no aterrizó por el webhook.
+   * Es la misma caída en el mismo render, así que se contesta igual.
+   */
+  test('una identidad sin Customer todavía en la base no se lee como una caída', async () => {
+    const t = convexTest(schema, modules);
+
+    await expect(
+      t.withIdentity({ subject: 'user_fantasma' }).query(api.chat.currentConversation, {})
+    ).resolves.toBeNull();
   });
 });
 
@@ -454,6 +484,139 @@ describe('una conversación que ya envió su Replacement Request queda de solo l
 });
 
 /**
+ * El Customer se sale de una conversación que no piensa terminar.
+ *
+ * Hasta aquí la única salida era enviar la Replacement Request: la pantalla
+ * resiembra siempre la última conversación, así que quien abría una y se
+ * arrepentía se quedaba dentro para siempre —tocar «Inicio» recargaba la misma
+ * pantalla y la misma conversación—. Abandonarla la deja de ser la actual sin
+ * borrarla.
+ */
+describe('un Customer abandona la conversación que tiene abierta', () => {
+  test('después de abandonarla no le queda ninguna conversación que reanudar', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+    await t.withIdentity({ subject: ana }).mutation(api.chat.abandonCurrentConversation, {});
+
+    expect(
+      await t.withIdentity({ subject: ana }).query(api.chat.currentConversation, {})
+    ).toBeNull();
+  });
+
+  /** Deja de ser la actual, no deja de existir: lo dicho ahí sigue guardado. */
+  test('lo que se dijo en ella no se borra', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+    await t.withIdentity({ subject: ana }).mutation(api.chat.abandonCurrentConversation, {});
+
+    expect(await t.run(async (ctx) => ctx.db.query('chat_messages').collect())).toHaveLength(1);
+  });
+
+  /**
+   * Lo que hace que la salida sea de verdad una salida: el turno siguiente no
+   * cae dentro de la que acaba de dejar.
+   */
+  test('el siguiente mensaje abre una conversación nueva y limpia', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+    await t.withIdentity({ subject: ana }).mutation(api.chat.abandonCurrentConversation, {});
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_2', 'user', 'Mejor el 162563')],
+    });
+
+    const conversacion = await t
+      .withIdentity({ subject: ana })
+      .query(api.chat.currentConversation, {});
+
+    expect(conversacion?.messages).toEqual([
+      asUiMessage(textTurn('msg_2', 'user', 'Mejor el 162563')),
+    ]);
+  });
+
+  test('sin conversación abierta no pasa nada', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await expect(
+      t.withIdentity({ subject: ana }).mutation(api.chat.abandonCurrentConversation, {})
+    ).resolves.toBeNull();
+  });
+
+  /**
+   * Una conversación cerrada por envío ya no es la actual para nadie, pero su
+   * folio se le sigue pintando al Customer mientras no diga otra cosa. Abandonar
+   * no la reescribe.
+   */
+  test('una conversación que ya envió su Replacement Request no se toca', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    const quoteId = await seedQuote(t, ana);
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [
+        textTurn('msg_1', 'user', 'Quiero cotizar el 162562'),
+        submittedTurn('msg_2', quoteId),
+      ],
+    });
+    await t.withIdentity({ subject: ana }).mutation(api.chat.abandonCurrentConversation, {});
+
+    const sesion = await t.run(async (ctx) => (await ctx.db.query('chat_sessions').collect())[0]);
+    expect(sesion.submittedAt).toEqual(expect.any(Number));
+    expect(sesion.abandonedAt).toBeUndefined();
+  });
+
+  /** Escribir sigue exigiendo identidad, como todo lo demás que escribe aquí. */
+  test('sin identidad no se abandona nada', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+
+    await expect(t.mutation(api.chat.abandonCurrentConversation, {})).rejects.toThrow();
+    expect(
+      await t.withIdentity({ subject: ana }).query(api.chat.currentConversation, {})
+    ).not.toBeNull();
+  });
+
+  /** Y sólo la propia: la de Ana no se abandona desde la identidad de Beto. */
+  test('la conversación de otro Customer no se abandona', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    const beto = await seedCustomer(t, 'user_beto', 'Beto');
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+    await t.withIdentity({ subject: beto }).mutation(api.chat.abandonCurrentConversation, {});
+
+    expect(
+      await t.withIdentity({ subject: ana }).query(api.chat.currentConversation, {})
+    ).not.toBeNull();
+  });
+});
+
+/**
  * Ticket 06 — la autorización se reduce a dos reglas. La conversación es una
  * superficie del Customer, así que se lee con la identidad de Clerk; se escribe
  * por el camino máquina a máquina, porque quien sabe de verdad lo que dijo el
@@ -469,7 +632,7 @@ describe('la escritura del turno no es alcanzable desde un navegador', () => {
       .filter(([, fn]) => (fn as { isPublic?: boolean }).isPublic)
       .map(([name]) => name);
 
-    expect(publicas).toEqual(['currentConversation']);
+    expect(publicas).toEqual(['currentConversation', 'abandonCurrentConversation']);
   });
 });
 

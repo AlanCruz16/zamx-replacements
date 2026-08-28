@@ -11,11 +11,10 @@
  * documentada del lado equivocado, también.
  */
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-
-const ROOT = process.cwd();
+import { ROOT, sourceFiles } from '@/test/source-files';
 
 /** Los encabezados de sección de `.env.example`, en su forma `## Nombre`. */
 const CONVEX_SIDE = 'Convex-side';
@@ -56,20 +55,19 @@ const PROVIDED_BY_THE_RUNTIME = new Set(['NODE_ENV']);
  */
 const DEV_ONLY_IMAP_ROUTE = 'src/app/api/debug-imap/route.ts';
 
-function sourceFiles(dir: string): string[] {
-  return readdirSync(join(ROOT, dir), { recursive: true, encoding: 'utf8' })
-    .map((entry) => join(dir, entry))
-    .filter((path) => /\.tsx?$/.test(path))
-    .filter((path) => !/\.(test|check)\.tsx?$/.test(path))
-    .filter((path) => !path.includes('_generated'))
-    .filter((path) => !path.startsWith(join('src', 'test')));
-}
+/** El andamiaje de pruebas no lee variables de entorno de producción. */
+const TEST_SCAFFOLDING = (path: string) => path.startsWith(join('src', 'test'));
 
 /** Cada `process.env.X` del código, con los ficheros que lo nombran. */
 function readsByVariable(): Map<string, string[]> {
   const found = new Map<string, string[]>();
 
-  for (const path of [...sourceFiles('convex'), ...sourceFiles('src')]) {
+  const scanned = [
+    ...sourceFiles('convex', { exclude: TEST_SCAFFOLDING }),
+    ...sourceFiles('src', { exclude: TEST_SCAFFOLDING }),
+  ];
+
+  for (const path of scanned) {
     const contents = readFileSync(join(ROOT, path), 'utf8');
     for (const match of contents.matchAll(/process\.env\.([A-Z][A-Z0-9_]*)/g)) {
       const name = match[1];
