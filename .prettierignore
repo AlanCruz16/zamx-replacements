@@ -1,0 +1,15 @@
+# Lo que escribe `convex dev` / `convex codegen`, no una persona.
+#
+# El CLI de Convex reescribe este directorio entero cada vez que corre, y lo
+# formatea con los valores por defecto de Prettier —comillas dobles, 80
+# columnas— en vez de con el `.prettierrc` de este proyecto. Sin esta línea,
+# `prettier --write` de lint-staged le da la vuelta al fichero al hacer commit y
+# el siguiente `convex dev` se la vuelve a dar: un diff de formato que va y
+# viene para siempre y ensucia todo cambio que toque el backend.
+#
+# De los cinco ficheros generados sólo `api.d.ts` llegó a desafinar, y por eso:
+# es el único cuyo contenido cambia al añadir o quitar un módulo de `convex/`,
+# así que es el único que alguna vez se puso en el índice, que es donde
+# lint-staged lo alcanzaba. Sus cuatro hermanos nunca cambiaron y siguen tal
+# como los escribió el CLI. Ahora los cinco van igual.
+convex/_generated/
