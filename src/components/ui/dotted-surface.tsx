@@ -1,25 +1,24 @@
 'use client';
 import { cn } from '@/lib/utils';
 import { useTheme } from 'next-themes';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
+import { cappedPixelRatio, useDecorativeBackground } from '@/lib/decorative-motion';
 
 type DottedSurfaceProps = Omit<React.ComponentProps<'div'>, 'ref'>;
 
+/**
+ * El fondo de puntos del chat.
+ *
+ * La regla de cuándo montarse —no en un teléfono, no si se ha pedido menos
+ * movimiento— la lleva `useDecorativeBackground`, compartida con el shader de
+ * las pantallas de acceso (ticket 11 de «usable-on-a-phone»). Aquí vivía antes
+ * la mitad del ancho, escrita a mano; el shader no tenía ninguna, y dos copias
+ * de la misma regla dejan de ser la misma en cuanto una cambie.
+ */
 export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
   const { resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-  const [isMobile, setIsMobile] = useState(true); // default to true to prevent SSR hydration mismatch of heavy WebGL
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMounted(true);
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
+  const backgroundEnabled = useDecorativeBackground();
 
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +45,7 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
       alpha: true,
       antialias: true,
     });
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(cappedPixelRatio(window.devicePixelRatio));
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setClearColor(scene.fog.color, 0);
 
@@ -152,9 +151,9 @@ export function DottedSurface({ className, ...props }: DottedSurfaceProps) {
       material.dispose();
       renderer.dispose();
     };
-  }, [resolvedTheme, isMobile]);
+  }, [resolvedTheme, backgroundEnabled]);
 
-  if (!mounted || isMobile) return null;
+  if (!backgroundEnabled) return null;
 
   return (
     <div

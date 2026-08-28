@@ -6,6 +6,7 @@ import { useOnClickOutside } from 'usehooks-ts';
 import { cn } from '@/lib/utils';
 import { LucideIcon } from 'lucide-react';
 import { TOUCH_TARGET } from '@/lib/touch-target';
+import { usePrefersReducedMotion } from '@/lib/decorative-motion';
 
 interface Tab {
   title: string;
@@ -48,7 +49,25 @@ const spanVariants = {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-const transition: any = { delay: 0.1, type: 'spring', bounce: 0, duration: 0.6 };
+const SPRING: any = { delay: 0.1, type: 'spring', bounce: 0, duration: 0.6 };
+
+/**
+ * Cómo llega la etiqueta a su sitio: con muelle, o ya puesta (ticket 11 de
+ * «usable-on-a-phone»).
+ *
+ * Este despliegue lo anima Framer Motion, es decir JavaScript escribiendo
+ * estilos en línea, así que el `@media (prefers-reduced-motion)` de
+ * `globals.css` no lo alcanza —apaga animaciones y transiciones del CSS, y aquí
+ * no hay ninguna—. Y la opción `reducedMotion` de Framer tampoco vale: sólo
+ * desactiva animaciones de transformación y de maquetación, y lo que se mueve
+ * aquí es ancho, opacidad y relleno.
+ *
+ * Duración cero, y no quitar la animación: los estados de `AnimatePresence` se
+ * siguen recorriendo, así que la etiqueta aparece y desaparece igual que antes.
+ * Lo único que se quita es el camino entre los dos.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const INSTANT: any = { duration: 0 };
 
 /**
  * Si la pantalla admite que la etiqueta de la pestaña elegida se despliegue.
@@ -109,6 +128,7 @@ export function ExpandableTabs({
 }: ExpandableTabsProps) {
   const [selected, setSelected] = React.useState<number | null>(null);
   const showLabels = useExpandableLabels();
+  const transition = usePrefersReducedMotion() ? INSTANT : SPRING;
   const outsideClickRef = React.useRef<HTMLDivElement>(null!);
 
   useOnClickOutside(outsideClickRef, () => {

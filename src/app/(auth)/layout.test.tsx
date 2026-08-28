@@ -67,6 +67,16 @@ describe('el armazón de alta e inicio de sesión', () => {
     }
   });
 
+  test('el fondo oscuro lo pinta la pantalla, no el shader', async () => {
+    // Todo lo que va encima está dibujado para leerse sobre oscuro —el wordmark
+    // en blanco, la tarjeta de Clerk con la letra blanca—, y el shader ya no se
+    // monta en un teléfono (ticket 11). Si el fondo se fuera con él, el alta se
+    // serviría en blanco sobre blanco.
+    const contenedor = await pintar();
+
+    expect(contenedor.firstElementChild!.className).toMatch(/(^|\s)bg-black(\s|$)/);
+  });
+
   test('la raíz no recorta lo que no cabe', async () => {
     const contenedor = await pintar();
 

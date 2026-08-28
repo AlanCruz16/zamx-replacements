@@ -2,6 +2,7 @@
 
 import * as React from 'react';
 import { cn } from '@/lib/utils';
+import { usePrefersReducedMotion } from '@/lib/decorative-motion';
 
 interface GooeyTextProps {
   texts: string[];
@@ -18,10 +19,13 @@ export function GooeyText({
   className,
   textClassName,
 }: GooeyTextProps) {
+  const reducedMotion = usePrefersReducedMotion();
   const text1Ref = React.useRef<HTMLSpanElement>(null);
   const text2Ref = React.useRef<HTMLSpanElement>(null);
 
   React.useEffect(() => {
+    if (reducedMotion) return;
+
     let textIndex = texts.length - 1;
     let time = new Date();
     let morph = 0;
@@ -94,7 +98,38 @@ export function GooeyText({
     return () => {
       cancelAnimationFrame(animationFrameId);
     };
-  }, [texts, morphTime, cooldownTime]);
+  }, [texts, morphTime, cooldownTime, reducedMotion]);
+
+  /*
+    Quieto no es «lo mismo sin animar» (ticket 11 de «usable-on-a-phone»).
+
+    Lo que se ve aquí lo escribe la propia animación: los dos `span` nacen
+    vacíos y es el bucle quien les pone texto, opacidad y desenfoque. Cortar el
+    bucle y dejar este JSX no dejaría una palabra quieta, dejaría dos palabras
+    vacías. Y el filtro `threshold` sólo es legible sobre el desenfoque para el
+    que está calculado: aplicado a un texto nítido lo recorta.
+
+    Así que la versión quieta es otra: una palabra —la primera de la lista, que
+    es la que se lee de todas formas al llegar— en el flujo y sin filtro. Misma
+    letra y mismo color; lo que falta es el camino entre una y la siguiente.
+  */
+  if (reducedMotion) {
+    return (
+      <div className={cn('relative', className)}>
+        <div className="w-full h-full flex items-center justify-center">
+          <span
+            className={cn(
+              'inline-block select-none text-center whitespace-nowrap text-6xl md:text-[60pt]',
+              'text-[var(--foreground)]',
+              textClassName
+            )}
+          >
+            {texts[0]}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={cn('relative', className)}>

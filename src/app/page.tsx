@@ -26,6 +26,7 @@ import { lastKnownLanguage, rememberLanguage } from '@/lib/language-preference';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
 import { useComposerInset } from '@/components/chat/composer-inset';
 import { TOUCH_TARGET } from '@/lib/touch-target';
+import { usePrefersReducedMotion } from '@/lib/decorative-motion';
 
 /**
  * Lo que se pinta mientras Convex contesta quién es el Customer y qué decía —y
@@ -216,10 +217,19 @@ function ChatDashboard({
    * el margen de desplazamiento del centinela levanta ese borde justo lo que el
    * compositor ocupa: el mismo valor único del ticket 05, no una segunda
    * estimación.
+   *
+   * El desplazamiento suave es movimiento, así que también se le pregunta al
+   * aparato (ticket 11). `scroll-behavior` en la hoja de estilos no alcanza a
+   * esto: una opción escrita en la llamada gana a la hoja. Sin suavizado el
+   * mensaje sigue quedando donde tiene que quedar; lo que se quita es el viaje.
    */
+  const reducedMotion = usePrefersReducedMotion();
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({
+      behavior: reducedMotion ? 'auto' : 'smooth',
+      block: 'end',
+    });
+  }, [messages, reducedMotion]);
 
   // Toda la copia de la pantalla sale del mismo módulo y del mismo idioma que
   // el chatbot, el Quote Document y los correos (ticket 20). Antes cada frase

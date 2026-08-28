@@ -145,3 +145,61 @@ body {
     transform: translate(-50%, -50%);
   }
 }
+
+/*
+  Menos movimiento, para quien se lo ha pedido a su aparato (ticket 11 de
+  «usable-on-a-phone»). Los dos fondos WebGL se apagan enteros desde
+  `@/lib/decorative-motion`, porque los pinta JavaScript y ninguna regla los
+  alcanza; lo que se apaga aquí es todo lo demás: el `fadeIn` de la bienvenida,
+  el rebote del indicador de escritura, el latido de la pantalla de carga y las
+  transiciones de las tarjetas.
+
+  Va contra el selector universal y no contra una lista de clases porque esas
+  animaciones no comparten ninguna: unas son utilidades de Tailwind y otra es un
+  estilo en línea. Enumerarlas dejaría fuera la que se escriba mañana.
+
+  0.01ms y no `none`: una animación anulada nunca llega a su fotograma final, y
+  la bienvenida arranca en `opacity: 0` con `forwards`, así que quitarla la
+  dejaría invisible. Terminarla al instante deja al Customer exactamente lo que
+  la animación iba a dejarle, sin el camino. La espera se pone a cero por lo
+  mismo: media décima de tarjetas en blanco no es «sin movimiento», es «tarde».
+
+  `!important` porque compite contra utilidades de Tailwind y contra estilos en
+  línea, y sin él pierde contra ambos.
+
+  Lo que se salva son los indicadores de progreso, que no son adorno: un
+  `animate-spin` y el latido de la pantalla de carga son la única señal de que
+  algo sigue en marcha. Congelarlos no le ahorra movimiento a nadie —le dice que
+  la app se ha colgado—, y quien pide menos movimiento pide justo eso, no menos
+  información. Lo que se ha pedido y esta regla concede es que no se mueva la
+  decoración; el resto de esta hoja se lo sigue quitando todo.
+*/
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /*
+    Las duraciones son las de Tailwind para estas dos utilidades, repetidas aquí
+    porque `!important` sólo se le gana a `!important`: no hay forma de devolver
+    una propiedad a lo que valía sin volver a escribirla. Si Tailwind cambiara
+    las suyas, lo único que pasaría es que el giro y el latido irían a otro
+    ritmo — no que dejen de verse, que es lo que esta regla protege.
+  */
+  .animate-spin {
+    animation-duration: 1s !important;
+    animation-iteration-count: infinite !important;
+  }
+
+  .animate-pulse {
+    animation-duration: 2s !important;
+    animation-iteration-count: infinite !important;
+  }
+}

@@ -40,6 +40,19 @@ Three, and all three are the Customer's:
   in DevTools measure the `::after` rectangle, not the button's — the button still measures what it
   always did.
 - The header keeps its height when a navigation control is tapped.
+- No decorative background is running on a phone at all: since ticket 11 neither WebGL background
+  mounts below 768px, so on any viewport in the list above the sign-in screen paints flat black and
+  settles immediately. That black belongs to the screen, not to the shader — the wordmark and the
+  Clerk form are both white, so if the sign-in screen ever comes up pale, the background went
+  missing rather than the shader.
+- **With reduced motion asked for** (iOS: Settings → Accessibility → Motion → Reduce Motion; macOS:
+  System Settings → Accessibility → Display → Reduce Motion; Chrome DevTools: Rendering →
+  "Emulate CSS prefers-reduced-motion"), no decoration moves anywhere: the welcome heading and the
+  cards are simply there rather than fading in, the morphing word is one word standing still and
+  legible, the typing dots do not bounce, a navigation label opens without a spring, and a new
+  message arrives without a scrolling animation. Nothing is missing or invisible — the check is
+  "still and complete", not "still". **Spinners are the exception and must still turn**: they are
+  status, not decoration, and a frozen one reads as a hung app.
 
 ## Measuring honestly
 
