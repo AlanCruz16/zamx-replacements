@@ -75,6 +75,20 @@ function openSession(session: Doc<'chat_sessions'> | null): Doc<'chat_sessions'>
   return isSubmitted(session) || isAbandoned(session) ? null : session;
 }
 
+/**
+ * Si un transcript continúa una conversación concreta: alguno de sus mensajes
+ * ya está guardado ahí. Es lo que distingue el turno que se quedó en vuelo de
+ * uno nuevo y legítimo, sin que el navegador tenga que decir a cuál pertenece.
+ */
+async function continues(
+  ctx: QueryCtx,
+  sessionId: Id<'chat_sessions'>,
+  messages: { messageId: string }[]
+): Promise<boolean> {
+  const saved = new Set((await messagesOf(ctx, sessionId)).map((m) => m.messageId));
+  return messages.some((m) => saved.has(m.messageId));
+}
+
 /** Los mensajes de una conversación, en el orden en que se dijeron. */
 async function messagesOf(ctx: QueryCtx, sessionId: Id<'chat_sessions'>) {
   return await ctx.db
@@ -233,8 +247,33 @@ export const persistTurn = internalMutation({
     }
 
     const open = openSession(latest);
+
+    // El turno que terminó después de que el Customer se saliera. El stream
+    // seguía en vuelo cuando «Inicio» abandonó la conversación, así que este
+    // transcript llega cuando ya no hay ninguna abierta donde ponerlo.
+    //
+    // Sin esto abría una conversación nueva y le copiaba dentro todo lo dicho
+    // en la abandonada, que pasaba a ser la actual: la pantalla resembraba en
+    // la carga siguiente justo la conversación de la que el Customer acababa de
+    // salirse —el ticket 21 otra vez—, y además con los mensajes duplicados en
+    // dos sesiones. Lo mismo ocurría con dos pestañas abiertas.
+    //
+    // Va a su conversación de origen, que se reconoce por los mensajes que ya
+    // guarda y no por ser la última. Guardarlo ahí no la resucita: abandonada
+    // sigue, y `currentConversation` no devuelve una abandonada. Lo dicho en
+    // ella se conserva —también la respuesta que el modelo alcanzó a dar— sin
+    // que vuelva a ser la conversación de nadie.
+    const abandoned =
+      open === null && latest !== null && isAbandoned(latest) && !isSubmitted(latest)
+        ? latest
+        : null;
+    const inFlight =
+      abandoned !== null && (await continues(ctx, abandoned._id, args.messages)) ? abandoned : null;
+
     const sessionId =
-      open?._id ?? (await ctx.db.insert('chat_sessions', { userId: user._id, lastMessageAt: now }));
+      open?._id ??
+      inFlight?._id ??
+      (await ctx.db.insert('chat_sessions', { userId: user._id, lastMessageAt: now }));
 
     const byMessageId = new Map((await messagesOf(ctx, sessionId)).map((m) => [m.messageId, m]));
 

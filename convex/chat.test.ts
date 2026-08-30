@@ -549,6 +549,102 @@ describe('un Customer abandona la conversación que tiene abierta', () => {
     ]);
   });
 
+  /**
+   * El turno que se quedó en vuelo. El Customer toca «Inicio» mientras el modelo
+   * aún contesta, así que el transcript entero llega a guardarse cuando ya no
+   * hay ninguna conversación abierta donde ponerlo.
+   *
+   * Antes abría una nueva y le copiaba dentro lo dicho en la abandonada, que
+   * pasaba a ser la actual: la carga siguiente devolvía al Customer justo a la
+   * conversación de la que acababa de salirse.
+   */
+  test('el turno que termina después de salirse no le devuelve la conversación', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+    await t.withIdentity({ subject: ana }).mutation(api.chat.abandonCurrentConversation, {});
+
+    // Lo que el servidor entrega al acabar el stream: el transcript entero,
+    // con el mensaje que ya estaba guardado y la respuesta que alcanzó a dar.
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [
+        textTurn('msg_1', 'user', 'Quiero cotizar el 162562'),
+        textTurn('msg_2', 'assistant', '¿De qué Modelo es?'),
+      ],
+    });
+
+    expect(
+      await t.withIdentity({ subject: ana }).query(api.chat.currentConversation, {})
+    ).toBeNull();
+  });
+
+  /** Va a la conversación de la que salió: ni se pierde ni se duplica. */
+  test('ese turno se guarda en la conversación que lo originó', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+    await t.withIdentity({ subject: ana }).mutation(api.chat.abandonCurrentConversation, {});
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [
+        textTurn('msg_1', 'user', 'Quiero cotizar el 162562'),
+        textTurn('msg_2', 'assistant', '¿De qué Modelo es?'),
+      ],
+    });
+
+    const { sesiones, mensajes } = await t.run(async (ctx) => ({
+      sesiones: await ctx.db.query('chat_sessions').collect(),
+      mensajes: await ctx.db.query('chat_messages').collect(),
+    }));
+
+    expect(sesiones).toHaveLength(1);
+    expect(mensajes.map((m) => m.messageId)).toEqual(['msg_1', 'msg_2']);
+    expect(mensajes.every((m) => m.sessionId === sesiones[0]._id)).toBe(true);
+  });
+
+  /**
+   * Y no por eso deja de haber salida: lo que el Customer escriba después es una
+   * conversación nueva, porque no continúa ninguno de los mensajes guardados.
+   */
+  test('después de ese turno el mensaje siguiente sigue abriendo otra', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+    await t.withIdentity({ subject: ana }).mutation(api.chat.abandonCurrentConversation, {});
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [
+        textTurn('msg_1', 'user', 'Quiero cotizar el 162562'),
+        textTurn('msg_2', 'assistant', '¿De qué Modelo es?'),
+      ],
+    });
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_3', 'user', 'Mejor el 162563')],
+    });
+
+    const conversacion = await t
+      .withIdentity({ subject: ana })
+      .query(api.chat.currentConversation, {});
+
+    expect(conversacion?.messages).toEqual([
+      asUiMessage(textTurn('msg_3', 'user', 'Mejor el 162563')),
+    ]);
+  });
+
   test('sin conversación abierta no pasa nada', async () => {
     const t = convexTest(schema, modules);
     const ana = await seedCustomer(t, 'user_ana');

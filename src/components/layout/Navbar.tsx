@@ -16,8 +16,14 @@ import { messagesFor, resolveLanguage } from '@/lib/messages';
  * conversación que el Customer tenga a medias—. Sin él la barra navega a la raíz
  * y ya está, que es lo correcto para una pantalla que no tiene nada que
  * abandonar.
+ *
+ * Puede tardar: la pantalla de chat escribe en el servidor antes de dejar la
+ * conversación. Por eso el tipo admite una promesa —tiparla como síncrona la
+ * hacía verdad sólo por no mirarla—, y lo que devuelva se mira. Quién le
+ * cuenta al Customer que no se pudo salir es la pantalla que sabe lo que
+ * intentaba; aquí sólo se garantiza que un fallo no se pierda en silencio.
  */
-export default function Navbar({ onHome }: { onHome?: () => void }) {
+export default function Navbar({ onHome }: { onHome?: () => void | Promise<void> }) {
   const user = useQuery(api.users.current);
   const updateLanguage = useMutation(api.users.updateLanguage);
   const [isQuotesModalOpen, setIsQuotesModalOpen] = useState(false);
@@ -50,8 +56,11 @@ export default function Navbar({ onHome }: { onHome?: () => void }) {
       // Navegación dentro de la app: `window.location.href` forzaba una carga
       // entera del documento —el bundle, el handshake y todas las consultas otra
       // vez—, que es lo más caro que un Customer puede tocar con datos móviles.
-      if (onHome) onHome();
-      else router.push('/');
+      if (onHome) {
+        Promise.resolve(onHome()).catch((error) => {
+          console.error('«Inicio» no pudo completarse:', error);
+        });
+      } else router.push('/');
     } else if (index === 2) {
       toggleLanguage();
     } else if (index === 4) {

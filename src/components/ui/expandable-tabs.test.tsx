@@ -166,6 +166,37 @@ describe('ExpandableTabs', () => {
     expect(onChange).toHaveBeenCalledWith(INDICE_IDIOMA);
   });
 
+  /**
+   * Safari trajo `addEventListener` en `MediaQueryList` en la 14. Un iPhone con
+   * iOS 13 sólo tiene `addListener`, y suscribirse a ciegas lanzaba durante el
+   * commit: como la barra se monta dentro del chat, el ChatErrorBoundary se
+   * comía la pantalla entera en cada carga, con un botón de reintentar que
+   * fallaba igual. Se declara la pantalla vieja tal cual es —sin el método— para
+   * que la prueba no pueda pasar por tenerlo puesto de más.
+   */
+  test('en un Safari viejo el control se monta igual, sin escuchar', () => {
+    vi.stubGlobal('matchMedia', (media: string) => ({
+      media,
+      matches: true,
+      addListener: () => {},
+      removeListener: () => {},
+    }));
+
+    const onChange = vi.fn();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    expect(() =>
+      act(() => {
+        root.render(<ExpandableTabs tabs={TABS} onChange={onChange} />);
+      })
+    ).not.toThrow();
+    montado = { root, container };
+
+    // Y monta el control entero, no un resto a medias.
+    expect(botones(container).map(nombreAccesible)).toEqual(['Inicio', 'ES / en']);
+  });
+
   test('cada pestaña se puede acertar con el pulgar', () => {
     const onChange = vi.fn();
     const container = montarPestanas(onChange, { admiteEtiquetas: false });

@@ -56,6 +56,7 @@ function chatState(overrides: Record<string, unknown> = {}) {
     error: undefined,
     sendMessage: vi.fn(),
     setMessages: vi.fn(),
+    stop: vi.fn(async () => {}),
     ...overrides,
   };
 }
@@ -263,8 +264,57 @@ describe('la pantalla de chat', () => {
     );
     boton?.click();
 
-    expect(abandonConversation).toHaveBeenCalled();
+    await vi.waitFor(() => expect(abandonConversation).toHaveBeenCalled());
     await vi.waitFor(() => expect(chat.setMessages).toHaveBeenCalledWith([]));
+
+    // Y lo primero de todo es cortar el stream. Salirse a media respuesta
+    // dejaba la petición en vuelo, y el turno terminaba en el servidor después
+    // del abandono: llegaba a guardarse sin conversación abierta donde ponerlo,
+    // y la carga siguiente devolvía al Customer a la que creía haber dejado.
+    // Antes de abandonar, no después, porque abandonar primero deja abierta esa
+    // misma ventana.
+    expect(chat.stop.mock.invocationCallOrder[0]).toBeLessThan(
+      abandonConversation.mock.invocationCallOrder[0]
+    );
+  });
+
+  /**
+   * Y si esa escritura no llega —la red de un teléfono, o un Customer cuya fila
+   * todavía no aterrizó por el webhook—, la conversación sigue abierta de
+   * verdad. Antes el botón se quedaba sin hacer nada y el rechazo sólo salía en
+   * la consola.
+   */
+  test('si no se pudo salir, la pantalla no se vacía y lo dice', async () => {
+    abandonConversation.mockRejectedValueOnce(new Error('offline'));
+    // El fallo se registra a propósito; aquí sólo se calla para no ensuciar la
+    // salida, y se devuelve la consola a su sitio antes de salir de la prueba.
+    const registrado = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const chat = chatState({
+      messages: [
+        {
+          id: 'm1',
+          role: 'assistant',
+          parts: [
+            {
+              type: 'tool-submit_quote_request',
+              state: 'output-available',
+              output: { success: true, requestId: 'REQ-V59X9B' },
+            },
+          ],
+        },
+      ],
+    });
+    const container = await render('es', chat);
+    const t = messagesFor('es').chat;
+
+    const boton = [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes(t.startNewConversation)
+    );
+    boton?.click();
+
+    await vi.waitFor(() => expect(readableText(container)).toContain(t.exitFailed));
+    expect(chat.setMessages).not.toHaveBeenCalledWith([]);
+    registrado.mockRestore();
   });
 });
 

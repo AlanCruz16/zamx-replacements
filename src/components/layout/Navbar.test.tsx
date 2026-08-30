@@ -48,7 +48,7 @@ vi.mock('@/components/ui/expandable-tabs', () => ({
   },
 }));
 
-async function render(language: Language, props: { onHome?: () => void } = {}) {
+async function render(language: Language, props: { onHome?: () => void | Promise<void> } = {}) {
   useQuery.mockReturnValue({ preferredLanguage: language });
   const { default: Navbar } = await import('./Navbar');
   return montar(<Navbar {...props} />);
@@ -111,6 +111,24 @@ describe('el control de inicio', () => {
 
     expect(onHome).toHaveBeenCalledTimes(1);
     expect(push).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Salirse es una escritura y puede fallar —en un teléfono se cae la red—. El
+   * tipo decía `() => void`, así que la promesa se tiraba: el rechazo salía como
+   * una unhandled rejection en la consola, y ninguna frontera de error lo veía
+   * porque no ocurre en un render. Se mira, aunque quien se lo cuenta al
+   * Customer sea la pantalla que sabe qué intentaba.
+   */
+  test('si salirse falla, el rechazo no se pierde', async () => {
+    const fallo = new Error('Usuario no encontrado en la base de datos.');
+    const onHome = vi.fn(() => Promise.reject(fallo));
+    const registrado = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await render('es', { onHome });
+
+    pulsar.tab(0);
+
+    await vi.waitFor(() => expect(registrado).toHaveBeenCalledWith(expect.any(String), fallo));
   });
 
   test('sin nada que abandonar navega a la raíz dentro de la app', async () => {

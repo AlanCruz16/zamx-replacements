@@ -112,6 +112,14 @@ const es = {
     startNewConversation: 'Empezar una conversación nueva',
 
     /**
+     * Salirse de la conversación es una escritura, y puede no llegar: en un
+     * teléfono se cae la red a media pulsación. Antes eso dejaba «Inicio» sin
+     * hacer absolutamente nada y sin decir por qué; la conversación sigue
+     * abierta, así que lo que se dice es eso y no otra cosa.
+     */
+    exitFailed: 'No pudimos salir de esta conversación. Revisa tu conexión y vuelve a intentarlo.',
+
+    /**
      * Lo que se lee cuando algo por debajo de la pantalla falla de una forma
      * que nadie previó (ticket 02). Va aquí, con el resto de la copia de la
      * pantalla, porque es la misma pantalla: lo que cambia es que en vez de la
@@ -326,6 +334,7 @@ const en: Messages = {
     inputPlaceholder: 'Type a message, model, or part number...',
     genericError: 'We could not send your message. Please try again.',
     startNewConversation: 'Start a new conversation',
+    exitFailed: 'We could not leave this conversation. Check your connection and try again.',
 
     errorTitle: 'Something went wrong on this screen',
     errorBody: 'We could not load your conversation. Please try again.',

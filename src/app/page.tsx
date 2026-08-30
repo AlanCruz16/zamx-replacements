@@ -161,7 +161,7 @@ function ChatDashboard({
     userRef.current = user;
   }, [user]);
 
-  const { messages, status, error, sendMessage, setMessages } = useChat({
+  const { messages, status, error, sendMessage, setMessages, stop } = useChat({
     messages: initialMessages,
     // eslint-disable-next-line react-hooks/refs
     transport: new DefaultChatTransport({
@@ -183,6 +183,14 @@ function ChatDashboard({
   });
 
   const [inputValue, setInputValue] = useState('');
+  /**
+   * Que salirse de la conversación no llegó al servidor. Es una escritura, y en
+   * un teléfono puede caerse la red a media pulsación: sin esto, «Inicio» se
+   * quedaba sin hacer nada y sin decir por qué, porque la pantalla sólo se vacía
+   * después de que el servidor conteste. Lo que falla se dice donde ya se dicen
+   * los demás fallos del chat.
+   */
+  const [exitError, setExitError] = useState(false);
   const abandonConversation = useMutation(api.chat.abandonCurrentConversation);
   const isLoading = status === 'streaming' || status === 'submitted';
 
@@ -262,7 +270,32 @@ function ChatDashboard({
    * «nueva conversación» en vez de dos que hay que mantener de acuerdo.
    */
   const startNewConversation = async () => {
-    await abandonConversation({});
+    // Primero cortar el stream. Salirse mientras el modelo aún contesta dejaba
+    // la petición en vuelo, y el turno terminaba en el servidor después del
+    // abandono: llegaba a guardarse sin conversación abierta donde ponerlo.
+    // Convex ya lo manda a la que lo originó, pero el que no se abre no hay que
+    // colocarlo en ningún sitio —ni gastarle al Customer los datos móviles de
+    // una respuesta que ya no va a leer.
+    await stop();
+
+    // Y si el servidor no contesta, la conversación sigue abierta de verdad: la
+    // pantalla no se vacía —vaciarla sería mentir, la carga siguiente la
+    // resembraría— y el Customer lee por qué en vez de pulsar un botón que no
+    // hace nada.
+    //
+    // Se resuelve igual en vez de relanzar: son dos los sitios que lo pulsan
+    // —la barra y el botón del hilo— y relanzar obligaba a los dos a repetir un
+    // manejo del que aquí ya se encargó todo lo que se le puede enseñar al
+    // Customer. El que se olvidara lo dejaba otra vez en una unhandled rejection.
+    try {
+      await abandonConversation({});
+    } catch (error) {
+      console.error('No se pudo abandonar la conversación:', error);
+      setExitError(true);
+      return;
+    }
+
+    setExitError(false);
     setMessages([]);
     setInputValue('');
   };
@@ -424,13 +457,13 @@ function ChatDashboard({
           enviado demasiados mensajes, vuelve en unos N minutos»— llega hasta
           aquí tal cual. Sin esto el Customer sólo veía que no pasaba nada.
         */}
-        {error && (
+        {(error || exitError) && (
           <div
             role="alert"
             className="mt-4 flex items-start gap-3 rounded-2xl border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40 px-5 py-3.5 text-[15px] leading-relaxed text-amber-900 dark:text-amber-200"
           >
             <AlertCircle size={20} className="shrink-0 mt-0.5" />
-            <p>{error.message || t.genericError}</p>
+            <p>{error ? error.message || t.genericError : t.exitFailed}</p>
           </div>
         )}
       </main>

@@ -105,6 +105,13 @@ function useExpandableLabels(): boolean {
     const read = () => setShowLabels(query.matches);
     read();
 
+    // Safari trajo `addEventListener` en `MediaQueryList` en la 14; en un iPhone
+    // con iOS 13 sólo está `addListener`. Suscribirse a ciegas lanzaba un
+    // TypeError durante el commit, y como esta barra se monta dentro del chat, el
+    // ChatErrorBoundary se tragaba la pantalla entera en cada carga. La respuesta
+    // prudente ya está puesta: donde no se pueda escuchar, no se escucha.
+    if (typeof query.addEventListener !== 'function') return;
+
     query.addEventListener('change', read);
     return () => query.removeEventListener('change', read);
   }, []);
