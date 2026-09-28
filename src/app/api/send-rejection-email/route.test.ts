@@ -59,7 +59,6 @@ function rejectionBody() {
   return {
     requestId: 'REQ-V59X9B',
     outcome: 'discontinued',
-    explanation: 'La pieza está descontinuada.',
   };
 }
 
@@ -139,6 +138,45 @@ describe('POST /api/send-rejection-email', () => {
       { body: { quoteId: 'quote_1' }, secret: INTERNAL_SECRET },
     ]);
     expect(convex.to(INTERNAL_PATHS.quoteDocumentSent)).toEqual([]);
+  });
+
+  test('el resumen interno del intérprete no le llega al Customer', async () => {
+    // `approverExplanation` lo redacta el modelo como nota interna, en español
+    // y con los Suggested Prices a la vista. Ni la del registro ni una que venga
+    // en el cuerpo se imprimen en el correo.
+    const interna = 'El empleado indica OEM; precio sugerido 2,900 USD.';
+    convex.reply(INTERNAL_PATHS.details, {
+      ...quoteDetails(),
+      quote: { ...quoteDetails().quote, approverExplanation: interna },
+    });
+    sendEmail.mockResolvedValue({ data: { id: 'email_1' }, error: null });
+    const POST = await loadHandler();
+
+    const res = await POST(
+      request(
+        { 'x-internal-secret': INTERNAL_SECRET },
+        { ...rejectionBody(), explanation: interna }
+      )
+    );
+
+    expect(res.status).toBe(200);
+    const [enviado] = sendEmail.mock.calls[0];
+    expect(enviado.html).not.toContain('El empleado indica');
+    expect(enviado.html).not.toContain('2,900');
+  });
+
+  test('lo que ya se le explicó no se le vuelve a mandar', async () => {
+    convex.reply(INTERNAL_PATHS.details, {
+      ...quoteDetails(),
+      quote: { ...quoteDetails().quote, rejectionExplainedAt: Date.UTC(2026, 7, 1) },
+    });
+    const POST = await loadHandler();
+
+    const res = await POST(request({ 'x-internal-secret': INTERNAL_SECRET }, rejectionBody()));
+
+    expect(res.status).toBe(200);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(convex.to(INTERNAL_PATHS.rejectionExplained)).toEqual([]);
   });
 
   test('un Outcome que esta ruta no sabe explicar no le llega al Customer', async () => {

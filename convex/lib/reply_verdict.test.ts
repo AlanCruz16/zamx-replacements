@@ -23,6 +23,15 @@ const REQUEST: RequestUnderReview = {
   requestId: 'REQ-ABC123',
   products: [
     { partNumber: 'P-001', suggestedPriceUSD: 1000 },
+    { partNumber: 'P-002', suggestedPriceUSD: 8000 },
+  ],
+};
+
+/** La misma Request con una pieza cuyo Model Prefix no tiene rango configurado. */
+const REQUEST_WITH_UNPRICED_PART: RequestUnderReview = {
+  requestId: 'REQ-ABC123',
+  products: [
+    { partNumber: 'P-001', suggestedPriceUSD: 1000 },
     { partNumber: 'P-002' }, // Model Prefix sin rango: no cotizable por el sistema.
   ],
 };
@@ -251,7 +260,13 @@ describe('un precio extraído se acota contra el Suggested Price', () => {
   test('una pieza sin Suggested Price no tiene contra qué acotarse: se acepta tal cual', () => {
     // Mandar la pieza a una persona para que la cotice a mano es exactamente lo
     // que se hace en lugar de acotarla.
-    const v = precios(8400, 'P-002');
+    const v = verdict({
+      request: REQUEST_WITH_UNPRICED_PART,
+      interpretation: {
+        classification: 'priced_differently',
+        newPricesUSD: [{ partNumber: 'P-002', price: 8400 }],
+      },
+    });
 
     expect(v.prices).toEqual([{ partNumber: 'P-002', status: 'applied', priceUSD: 8400 }]);
     expect(v.replyToApprover).toBeUndefined();
@@ -346,5 +361,69 @@ describe('qué se escribe y qué se contesta a partir del veredicto', () => {
 
   test('sin nada que contar la lista viene vacía', () => {
     expect(unappliedPrices(conPrecios({ partNumber: 'P-001', price: 1200 }))).toEqual([]);
+  });
+});
+
+describe('un Outcome con precio no deja ninguna pieza sin Confirmed Price', () => {
+  // El Quote Document exige precio en todas las piezas. Fijar el Outcome con una
+  // pieza sin precio dejaba la Request cotizada y sin documento que mandarle al
+  // Customer, y la corrección del Approver llegaba a una decisión ya tomada.
+
+  test('aprobar en bloque con una pieza sin Suggested Price no fija Outcome', () => {
+    const v = verdict({ request: REQUEST_WITH_UNPRICED_PART });
+
+    expect(v.outcome).toBeUndefined();
+    expect(v.replyToApprover).toBe('price_missing');
+    expect(v.partsWithoutPrice).toEqual(['P-002']);
+  });
+
+  test('un precio distinto sólo para otra pieza tampoco la cubre', () => {
+    const v = verdict({
+      request: REQUEST_WITH_UNPRICED_PART,
+      interpretation: {
+        classification: 'priced_differently',
+        newPricesUSD: [{ partNumber: 'P-001', price: 1200 }],
+      },
+    });
+
+    expect(v.outcome).toBeUndefined();
+    expect(v.replyToApprover).toBe('price_missing');
+    expect(v.partsWithoutPrice).toEqual(['P-002']);
+  });
+
+  test('con una cifra para la pieza sin Suggested Price sí hay Outcome', () => {
+    const v = verdict({
+      request: REQUEST_WITH_UNPRICED_PART,
+      interpretation: {
+        classification: 'priced_differently',
+        newPricesUSD: [{ partNumber: 'P-002', price: 8400 }],
+      },
+    });
+
+    expect(v.outcome).toBe('priced_differently');
+    expect(v.partsWithoutPrice).toBeUndefined();
+  });
+
+  test('un Outcome sin Quote Document no necesita precios', () => {
+    const v = verdict({
+      request: REQUEST_WITH_UNPRICED_PART,
+      interpretation: { classification: 'discontinued' },
+    });
+
+    expect(v.outcome).toBe('discontinued');
+    expect(v.replyToApprover).toBeUndefined();
+  });
+
+  test('si además hay un precio fuera de banda, se nombran las dos cosas', () => {
+    const v = verdict({
+      request: REQUEST_WITH_UNPRICED_PART,
+      interpretation: {
+        classification: 'priced_differently',
+        newPricesUSD: [{ partNumber: 'P-001', price: 17_000 }],
+      },
+    });
+
+    expect(v.replyToApprover).toBe('price_out_of_bounds');
+    expect(v.partsWithoutPrice).toEqual(['P-002']);
   });
 });

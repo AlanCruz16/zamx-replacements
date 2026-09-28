@@ -131,3 +131,29 @@ describe('la Replacement Request ya tenía Outcome', () => {
     }
   });
 });
+
+describe('una pieza que se quedaría sin precio', () => {
+  const { text } = composeApproverReply({
+    requestId: 'REQ-ABC123',
+    reason: 'price_missing',
+    partsWithoutPrice: ['P-002'],
+  });
+
+  test('nombra la pieza y pide su precio en USD', () => {
+    expect(text).toContain('P-002');
+    expect(text).toContain('USD');
+    expect(text).toContain('no se ha registrado');
+  });
+
+  test('acompaña a un precio fuera de banda cuando llegan juntos', () => {
+    const { text: ambos } = composeApproverReply({
+      requestId: 'REQ-ABC123',
+      reason: 'price_out_of_bounds',
+      prices: [{ partNumber: 'P-001', priceUSD: 17_000, suggestedPriceUSD: 1000 }],
+      partsWithoutPrice: ['P-002'],
+    });
+
+    expect(ambos).toContain('P-001');
+    expect(ambos).toContain('  · P-002');
+  });
+});

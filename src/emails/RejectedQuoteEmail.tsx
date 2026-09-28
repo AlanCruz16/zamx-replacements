@@ -31,7 +31,6 @@ interface RejectedQuoteEmailProps {
   fullName: string;
   requestId: string;
   outcome: NotifiableOutcome;
-  explanation?: string;
   /**
    * De dónde cuelgan el logo y el enlace de vuelta. Ausente cuando la
    * aplicación no tiene URL público configurado, y entonces el correo sale sin
@@ -56,7 +55,6 @@ export const RejectedQuoteEmail = ({
   fullName,
   requestId,
   outcome,
-  explanation = '',
   baseUrl,
   language,
 }: RejectedQuoteEmailProps) => {
@@ -94,12 +92,11 @@ export const RejectedQuoteEmail = ({
             </Text>
 
             <Section className="bg-gray-50 border-l-4 border-[#00519E] p-4 my-6">
+              {/* Sin "nota adicional": la explicación que hay en el registro la
+                  escribe el intérprete como resumen interno de la decisión, en
+                  español y con las cifras que tuvo delante, Suggested Prices
+                  incluidos. No son palabras para el Customer. */}
               <Text className="text-gray-800 text-base m-0">{t.reasonMessage[outcome]}</Text>
-              {explanation && (
-                <Text className="text-gray-700 text-sm mt-4 italic">
-                  <strong>{t.additionalNote}</strong> &quot;{explanation}&quot;
-                </Text>
-              )}
             </Section>
 
             {outcome === 'blocked_pending_info' && baseUrl && (

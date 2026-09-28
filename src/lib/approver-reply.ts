@@ -12,7 +12,7 @@ import { usd } from './money';
  */
 
 /**
- * Los tres motivos que ya distingue el veredicto, más el que sólo conoce la
+ * Los motivos que ya distingue el veredicto, más el que sólo conoce la
  * transacción: la respuesta llegó a una Replacement Request que ya tenía
  * Outcome. Gana la primera respuesta, y a la segunda hay que decírselo.
  */
@@ -24,6 +24,8 @@ export type ApproverReplyPayload = {
   requestId: string;
   reason: ApproverReplyReason;
   prices?: UnappliedPrice[];
+  /** Las piezas que se quedarían sin Confirmed Price con la decisión leída. */
+  partsWithoutPrice?: string[];
   /** Sólo con `already_settled`: el Outcome que ya tenía la Request. */
   outcome?: Outcome;
 };
@@ -80,6 +82,21 @@ function outOfBandBlock(prices: UnappliedPrice[]): string[] {
   ];
 }
 
+/** Piezas sin Suggested Price para las que la respuesta no dio cifra. */
+function missingPriceBlock(partNumbers: string[]): string[] {
+  if (partNumbers.length === 0) return [];
+
+  return [
+    '',
+    'Sin precio sugerido y sin una cifra en su respuesta, así que no se puede emitir',
+    'la cotización:',
+    '',
+    ...partNumbers.map((partNumber) => `  · ${partNumber}`),
+    '',
+    'Conteste con el precio en USD de cada una de estas piezas.',
+  ];
+}
+
 /** Precios para piezas que no están en la Replacement Request. */
 function unknownPartBlock(prices: UnappliedPrice[]): string[] {
   if (prices.length === 0) return [];
@@ -120,6 +137,14 @@ function bodyFor(payload: ApproverReplyPayload, prices: UnappliedPrice[]): strin
         'enviado nada.',
         ...outOfBandBlock(prices.filter((p) => p.suggestedPriceUSD !== undefined)),
         ...unknownPartBlock(prices.filter((p) => p.suggestedPriceUSD === undefined)),
+        ...missingPriceBlock(payload.partsWithoutPrice ?? []),
+      ];
+
+    case 'price_missing':
+      return [
+        'Su decisión no se ha registrado: faltan precios, y la solicitud sigue en revisión',
+        'hasta que los indique. Al cliente no se le ha enviado nada.',
+        ...missingPriceBlock(payload.partsWithoutPrice ?? []),
       ];
 
     case 'already_settled':

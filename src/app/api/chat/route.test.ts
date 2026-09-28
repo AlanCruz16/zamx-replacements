@@ -14,11 +14,20 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
  * argumento con el que la ruta llama, que es lo único suyo que hay que creer.
  */
 
-const { authMock, consumeChatRateLimit, persistChatTurn, streamText } = vi.hoisted(() => ({
+const {
+  authMock,
+  consumeChatRateLimit,
+  persistChatTurn,
+  streamText,
+  createReplacementRequest,
+  sendEmail,
+} = vi.hoisted(() => ({
   authMock: vi.fn(),
   consumeChatRateLimit: vi.fn(),
   persistChatTurn: vi.fn(),
   streamText: vi.fn(),
+  createReplacementRequest: vi.fn(),
+  sendEmail: vi.fn(),
 }));
 
 vi.mock('@clerk/nextjs/server', () => ({ auth: authMock }));
@@ -26,12 +35,12 @@ vi.mock('@clerk/nextjs/server', () => ({ auth: authMock }));
 vi.mock('@/lib/internal-api', () => ({
   consumeChatRateLimit,
   persistChatTurn,
-  createReplacementRequest: vi.fn(),
+  createReplacementRequest,
 }));
 
 vi.mock('resend', () => ({
   Resend: class {
-    emails = { send: vi.fn() };
+    emails = { send: sendEmail };
   },
 }));
 
@@ -359,5 +368,64 @@ describe('POST /api/chat', () => {
 
     expect(res.status).toBe(503);
     expect(streamText).not.toHaveBeenCalled();
+  });
+
+  describe('el aviso al Approver de una Request nueva', () => {
+    async function enviarSolicitud() {
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      createReplacementRequest.mockResolvedValue({
+        quoteId: 'quote_1',
+        requestId: 'REQ-ABC123',
+        products: [],
+        customer: { fullName: 'Ana', companyName: 'ACME', email: 'ana@example.com' },
+        subtotalUSD: 0,
+        taxUSD: 0,
+        totalUSD: 0,
+      });
+      const POST = await loadHandler();
+      await POST(request());
+
+      const [{ tools }] = streamText.mock.calls[0];
+      return tools.submit_quote_request.execute(
+        {
+          products: [
+            { partNumber: 'P-001', model: 'MK137', quantity: 1, deliveryLocation: 'Monterrey' },
+          ],
+        },
+        { toolCallId: 't1', messages: [] }
+      );
+    }
+
+    test('un rechazo de Resend se registra como error, no como enviado', async () => {
+      // Resend no lanza: devuelve `{ error }`. Leerlo como éxito dejaba la
+      // Request esperando a un Approver que nunca se enteró.
+      vi.stubEnv('ADMIN_EMAIL', 'ventas@example.com');
+      sendEmail.mockResolvedValue({ data: null, error: { message: 'domain not verified' } });
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const resultado = await enviarSolicitud();
+
+      expect(resultado).toMatchObject({ success: true, requestId: 'REQ-ABC123' });
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('REQ-ABC123'),
+        expect.objectContaining({ message: expect.stringContaining('domain not verified') })
+      );
+      expect(log).not.toHaveBeenCalledWith('Email sent successfully via Resend');
+    });
+
+    test('sin ADMIN_EMAIL no se manda a nadie y se dice por qué', async () => {
+      vi.stubEnv('ADMIN_EMAIL', '');
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      await enviarSolicitud();
+
+      expect(sendEmail).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ message: expect.stringContaining('ADMIN_EMAIL') })
+      );
+    });
   });
 });

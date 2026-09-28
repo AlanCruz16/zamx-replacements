@@ -63,6 +63,12 @@ export default defineSchema({
     ),
     /** Ausente => en revisión. Ver `outcomeValidator`. */
     outcome: v.optional(outcomeValidator),
+    /**
+     * Cuándo se fijó el Outcome vigente. Es lo que deja reintentar la
+     * notificación al Customer sin pisar el primer intento, que sale en el mismo
+     * sondeo que lo fijó.
+     */
+    outcomeSettledAt: v.optional(v.number()),
     /** Las palabras del propio Approver, conservadas junto al Outcome. */
     approverExplanation: v.optional(v.string()),
     /** Cuándo se le dijo algo al Customer, sea lo que sea. Independiente del Outcome. */
@@ -78,7 +84,8 @@ export default defineSchema({
     expiresAt: v.number(),
   })
     .index('by_user_id', ['userId'])
-    .index('by_request_id', ['requestId']),
+    .index('by_request_id', ['requestId'])
+    .index('by_notification', ['customerNotifiedAt', 'outcome']),
 
   /**
    * Conversaciones del chat (ticket 21). Se definen aquí para que el esquema se
