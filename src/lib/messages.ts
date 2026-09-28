@@ -303,7 +303,6 @@ const es = {
     greeting: 'Estimado/a',
     introBefore: 'En relación a su solicitud de cotización con folio ',
     introAfter: ', le compartimos la siguiente información:',
-    additionalNote: 'Nota adicional de nuestro equipo:',
     backToPlatform: 'Regresar a la plataforma',
     replyInvitation:
       'Si tiene alguna duda o requiere asistencia técnica adicional, no dude en responder a este correo.',
@@ -480,7 +479,6 @@ const en: Messages = {
     greeting: 'Dear',
     introBefore: 'Regarding your request for quotation with reference ',
     introAfter: ', we would like to share the following information with you:',
-    additionalNote: 'Additional note from our team:',
     backToPlatform: 'Back to the platform',
     replyInvitation:
       'If you have any questions or need further technical assistance, feel free to reply to this email.',

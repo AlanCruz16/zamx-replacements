@@ -151,11 +151,19 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
             // 1. Guardar la cotización en Convex
             const result = await createReplacementRequest({ clerkId, products });
 
-            // 2. Enviar el email con Resend
+            // 2. Enviar el email con Resend. Resend no lanza cuando rechaza un
+            // envío: devuelve `{ error }`. Sin mirarlo, un dominio sin verificar
+            // o un `ADMIN_EMAIL` vacío se registraban como "enviado" y la
+            // Request esperaba a un Approver que nunca se enteró.
             try {
-              await resend.emails.send({
+              const adminEmail = process.env.ADMIN_EMAIL;
+              if (!adminEmail) {
+                throw new Error('ADMIN_EMAIL no está configurado: nadie recibe la solicitud.');
+              }
+
+              const { error: sendError } = await resend.emails.send({
                 from: SUPPORT_SENDER,
-                to: [process.env.ADMIN_EMAIL as string], // Enviar al correo del administrador configurado en entorno
+                to: [adminEmail],
                 replyTo: process.env.IMAP_USER as string,
                 subject: `Nueva solicitud de cotización: [${result.requestId}]`,
                 react: QuoteRequestTemplate({
@@ -170,9 +178,15 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
                   totalUSD: result.totalUSD,
                 }) as React.ReactElement,
               });
+
+              if (sendError)
+                throw new Error(`Resend rechazó el envío: ${JSON.stringify(sendError)}`);
               console.log('Email sent successfully via Resend');
             } catch (emailError) {
-              console.error('Error enviando el email con Resend:', emailError);
+              console.error(
+                `Error enviando al Approver la solicitud ${result.requestId}:`,
+                emailError
+              );
               // We don't fail the chat if the email fails
             }
 

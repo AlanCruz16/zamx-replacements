@@ -42,6 +42,12 @@ export async function POST(req: Request) {
 
     const { quote, user } = data;
 
+    // El sondeo reintenta lo que no se registró como enviado, y dos sondeos
+    // pueden solaparse: lo que ya salió no se vuelve a mandar.
+    if (quote.quoteDocumentSentAt !== undefined) {
+      return NextResponse.json({ success: true, alreadySent: true });
+    }
+
     // 2. Preparar los datos para el PDF. Misma regla que la descarga, mismo
     // módulo: sin Outcome con precio y sin Confirmed Price en todas las piezas
     // no hay Quote Document que adjuntar.

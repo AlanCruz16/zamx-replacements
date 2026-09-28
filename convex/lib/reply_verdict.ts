@@ -1,4 +1,4 @@
-import type { Outcome } from './outcome';
+import { isPricedOutcome, type Outcome } from './outcome';
 
 /**
  * Las reglas que decide una respuesta del Approver, fuera de la cáscara de E/S.
@@ -61,7 +61,11 @@ export type PriceDecision =
   | { partNumber: string; status: 'unknown_part'; priceUSD: number };
 
 /** Por qué hay que contestarle al Approver en vez de callar. */
-export type ReplyReason = 'low_confidence' | 'price_out_of_bounds' | 'price_for_unknown_part';
+export type ReplyReason =
+  | 'low_confidence'
+  | 'price_out_of_bounds'
+  | 'price_for_unknown_part'
+  | 'price_missing';
 
 export type Verdict = {
   screening: Screening;
@@ -74,6 +78,11 @@ export type Verdict = {
   prices: PriceDecision[];
   deliveryWeeks?: number;
   replyToApprover?: ReplyReason;
+  /**
+   * Las piezas que se quedarían sin Confirmed Price si el Outcome con precio se
+   * fijara. Presente sólo cuando hay alguna.
+   */
+  partsWithoutPrice?: string[];
 };
 
 /** Por debajo de esto la interpretación no basta para mover nada. */
@@ -187,11 +196,29 @@ export function verdictForReply(input: {
   // Un precio que no se pudo aplicar no se descarta en silencio: por qué no se
   // aplicó es lo que hay que contestarle al Approver. Una pieza que no está en
   // la Replacement Request suele ser un número de parte mal leído.
+  // Un Outcome con precio promete un Quote Document, y el Quote Document exige
+  // Confirmed Price en todas las piezas. Una pieza sin Suggested Price sólo lo
+  // obtiene de una cifra que el Approver haya dado para ella; aprobar "como se
+  // sugirió" no le da ninguna. Fijar el Outcome igualmente dejaba la Request
+  // cotizada y sin documento que mandar, y la corrección del Approver llegaba a
+  // una decisión ya tomada.
+  const partsWithoutPrice = isPricedOutcome(classification)
+    ? request.products
+        .filter((product) => product.suggestedPriceUSD === undefined)
+        .filter(
+          (product) =>
+            !prices.some((p) => p.status === 'applied' && p.partNumber === product.partNumber)
+        )
+        .map((product) => product.partNumber)
+    : [];
+
   const replyToApprover = prices.some((p) => p.status === 'out_of_bounds')
     ? ('price_out_of_bounds' as const)
     : prices.some((p) => p.status === 'unknown_part')
       ? ('price_for_unknown_part' as const)
-      : undefined;
+      : partsWithoutPrice.length > 0
+        ? ('price_missing' as const)
+        : undefined;
 
   // Con un precio sin aplicar no hay Outcome: la Replacement Request se queda en
   // revisión hasta que el Approver confirme la cifra.
@@ -213,6 +240,7 @@ export function verdictForReply(input: {
       ? { deliveryWeeks: interpretation.newDeliveryWeeks }
       : {}),
     ...(replyToApprover === undefined ? {} : { replyToApprover }),
+    ...(partsWithoutPrice.length === 0 ? {} : { partsWithoutPrice }),
   };
 }
 

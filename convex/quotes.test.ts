@@ -683,6 +683,127 @@ describe('llegar a un Outcome es una transición atómica', () => {
   });
 });
 
+describe('esperar información no es una decisión final', () => {
+  async function bloqueada(t: TestConvex) {
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'blocked_pending_info',
+      explanation: 'Falta foto de la placa.',
+    });
+    // Al Customer se le pidió la información.
+    await t.mutation(internal.quotes.markRejectionExplained, { quoteId: creada.quoteId });
+
+    return creada;
+  }
+
+  test('la respuesta del Approver tras recibir la información fija el Outcome', async () => {
+    const t = convexTest(schema, modules);
+    const creada = await bloqueada(t);
+
+    const resultado = await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_differently',
+      explanation: 'Con la placa, va en 5555.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 5555 }],
+    });
+
+    expect(resultado).toMatchObject({ kind: 'settled', outcome: 'priced_differently' });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.outcome).toBe('priced_differently');
+    expect(stored!.products[0].confirmedPriceUSD).toBe(5555);
+    // Lo que se le notificó era la petición de información, no esta decisión.
+    expect(stored!.customerNotifiedAt).toBeUndefined();
+    expect(stored!.rejectionExplainedAt).toBeUndefined();
+  });
+
+  test('una respuesta que no decide nada deja la espera como estaba', async () => {
+    const t = convexTest(schema, modules);
+    const creada = await bloqueada(t);
+
+    const resultado = await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      explanation: 'Respuesta ambigua.',
+    });
+
+    expect(resultado).toMatchObject({ kind: 'undecided' });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.outcome).toBe('blocked_pending_info');
+    expect(stored!.approverExplanation).toBe('Falta foto de la placa.');
+    expect(stored!.customerNotifiedAt).toBeDefined();
+  });
+
+  test('una vez decidida, vuelve a ganar la primera respuesta', async () => {
+    const t = convexTest(schema, modules);
+    const creada = await bloqueada(t);
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'discontinued',
+      explanation: 'Descontinuada.',
+    });
+    const tercero = await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_as_suggested',
+      explanation: 'Perdón, sí.',
+    });
+
+    expect(tercero).toMatchObject({ kind: 'already_settled', outcome: 'discontinued' });
+  });
+});
+
+describe('las notificaciones al Customer que no salieron se reintentan', () => {
+  const HORA = 60 * 60 * 1000;
+
+  async function decidida(t: TestConvex, outcome: 'discontinued' | 'priced_as_suggested') {
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome,
+      explanation: 'Decidido.',
+    });
+    return creada;
+  }
+
+  function pendientes(t: TestConvex, ahora: number) {
+    return t.query(internal.quotes.pendingCustomerNotifications, {
+      settledAfter: ahora - 72 * HORA,
+      settledBefore: ahora - 0.1 * HORA,
+    });
+  }
+
+  test('un Outcome sin notificación pasada la espera queda pendiente', async () => {
+    const t = convexTest(schema, modules);
+    const creada = await decidida(t, 'discontinued');
+
+    expect(await pendientes(t, Date.now() + HORA)).toEqual([
+      { requestId: creada.requestId, outcome: 'discontinued' },
+    ]);
+  });
+
+  test('lo recién fijado no se reintenta: su primer envío puede seguir en vuelo', async () => {
+    const t = convexTest(schema, modules);
+    await decidida(t, 'priced_as_suggested');
+
+    expect(await pendientes(t, Date.now())).toEqual([]);
+  });
+
+  test('lo ya notificado, lo que sigue en revisión y lo muy antiguo no se reintentan', async () => {
+    const t = convexTest(schema, modules);
+    const notificada = await decidida(t, 'priced_as_suggested');
+    await t.mutation(internal.quotes.markQuoteDocumentSent, { quoteId: notificada.quoteId });
+    await createQuote(t, 'user_ana');
+
+    expect(await pendientes(t, Date.now() + HORA)).toEqual([]);
+    expect(await pendientes(t, Date.now() + 100 * HORA)).toEqual([]);
+  });
+});
+
 describe('quotes.getUserQuotes', () => {
   /**
    * Antes esta lectura lanzaba `No autenticado`, y la afirmación era que

@@ -272,6 +272,23 @@ describe('POST /api/send-client-quote', () => {
     expect(enviado.attachments[0].filename).toBe('Quotation_REQ-V59X9B.pdf');
   });
 
+  test('un Quote Document que ya salió no se vuelve a mandar', async () => {
+    // El sondeo reintenta lo pendiente y puede solaparse consigo mismo.
+    convex.reply(INTERNAL_PATHS.details, {
+      ...quoteDetails(),
+      quote: { ...quoteDetails().quote, quoteDocumentSentAt: Date.UTC(2026, 7, 1) },
+    });
+    const POST = await loadHandler();
+
+    const res = await POST(
+      request({ 'x-internal-secret': INTERNAL_SECRET }, { requestId: 'REQ-V59X9B' })
+    );
+
+    expect(res.status).toBe(200);
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(convex.to(INTERNAL_PATHS.quoteDocumentSent)).toEqual([]);
+  });
+
   test('sin Confirmed Price no se produce Quote Document ni se cotiza la pieza a cero', async () => {
     const detalles = quoteDetails();
     delete (detalles.quote.products[0] as { confirmedPriceUSD?: number }).confirmedPriceUSD;

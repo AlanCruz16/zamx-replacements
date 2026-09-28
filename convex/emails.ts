@@ -5,7 +5,7 @@ import { internal } from './_generated/api';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import { interpretApproverReply } from '../src/lib/gemini-parser';
-import { isPricedOutcome } from './lib/outcome';
+import { isPricedOutcome, type Outcome } from './lib/outcome';
 import {
   confirmedPrices,
   screenInboundMessage,
@@ -74,6 +74,61 @@ async function postInternal(
   } catch (e) {
     console.error(`Error trigger ${label}:`, e);
     return false;
+  }
+}
+
+/**
+ * Le dice al Customer qué se decidió: el Quote Document si el Outcome lleva
+ * precio, la explicación si no. Devuelve si la ruta lo aceptó.
+ *
+ * Sólo viajan el folio y el Outcome. La explicación que produce el intérprete es
+ * un resumen interno —en español, con los Suggested Prices a la vista— y no es
+ * texto para el Customer.
+ */
+function notifyCustomer(
+  baseUrl: string,
+  internalSecret: string,
+  requestId: string,
+  outcome: Outcome
+): Promise<boolean> {
+  return isPricedOutcome(outcome)
+    ? postInternal(baseUrl, internalSecret, '/api/send-client-quote', { requestId }, 'PDF')
+    : postInternal(
+        baseUrl,
+        internalSecret,
+        '/api/send-rejection-email',
+        { requestId, outcome },
+        'Rejection Email'
+      );
+}
+
+/**
+ * Cuánto se espera antes de reintentar una notificación, y hasta cuándo.
+ *
+ * El primer intento sale en el mismo sondeo que fija el Outcome; la espera deja
+ * que termine antes de que un sondeo que se solape lo mande otra vez. La ventana
+ * de tres días cubre un apagón de Resend o de Vercel de un fin de semana.
+ */
+const NOTIFY_RETRY_GRACE_MS = 10 * 60 * 1000;
+const NOTIFY_RETRY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000;
+
+/**
+ * Reintenta las notificaciones al Customer que no salieron. Las rutas registran
+ * el envío al terminar, así que lo pendiente es exactamente lo que falló.
+ */
+async function retryCustomerNotifications(ctx: ActionCtx, internalSecret: string): Promise<void> {
+  const baseUrl = webhookBaseUrl();
+  if (baseUrl === undefined) return;
+
+  const now = Date.now();
+  const pending = await ctx.runQuery(internal.quotes.pendingCustomerNotifications, {
+    settledAfter: now - NOTIFY_RETRY_WINDOW_MS,
+    settledBefore: now - NOTIFY_RETRY_GRACE_MS,
+  });
+
+  for (const { requestId, outcome } of pending) {
+    console.warn(`Reintentando la notificación al Customer de ${requestId} (${outcome}).`);
+    await notifyCustomer(baseUrl, internalSecret, requestId, outcome);
   }
 }
 
@@ -162,6 +217,14 @@ export const checkInbox = internalAction({
     // Una variable ausente no es una denegación: se nombra, para que la causa se
     // lea en el propio error en vez de disfrazarse de fallo del paso siguiente.
     const internalSecret = requireInternalSecret();
+
+    // Antes de leer el buzón y sin depender de él: una notificación que no
+    // salió no tiene por qué esperar a que IMAP vuelva.
+    try {
+      await retryCustomerNotifications(ctx, internalSecret);
+    } catch (e) {
+      console.error('Error reintentando notificaciones al Customer:', e);
+    }
 
     const client = new ImapFlow({
       host: process.env.IMAP_HOST,
@@ -337,8 +400,8 @@ export const checkInbox = internalAction({
             continue;
           }
 
-          // Confianza baja, un precio fuera de banda o un precio para una pieza
-          // ajena a la Request. En los tres casos el veredicto se quedó sin
+          // Confianza baja, un precio fuera de banda, un precio para una pieza
+          // ajena a la Request o una pieza que se quedaría sin precio. En todos el veredicto se quedó sin
           // Outcome, así que la Request sigue en revisión y lo que falta es
           // decirle al Approver qué no se pudo aplicar.
           if (verdict.replyToApprover !== undefined) {
@@ -346,6 +409,9 @@ export const checkInbox = internalAction({
               requestId: msg.requestId,
               reason: verdict.replyToApprover,
               prices: unappliedPrices(verdict),
+              ...(verdict.partsWithoutPrice === undefined
+                ? {}
+                : { partsWithoutPrice: verdict.partsWithoutPrice }),
             });
           }
 
@@ -353,15 +419,10 @@ export const checkInbox = internalAction({
 
           // El Outcome decide a quién se le avisa. Sin Outcome (confianza baja o
           // clasificación desconocida) al Customer no se le dice nada: la
-          // Replacement Request sigue en revisión.
-          if (isPricedOutcome(outcome)) {
-            await post('/api/send-client-quote', { requestId: msg.requestId }, 'PDF');
-          } else if (outcome !== undefined) {
-            await post(
-              '/api/send-rejection-email',
-              { requestId: msg.requestId, outcome, explanation: verdict.explanation },
-              'Rejection Email'
-            );
+          // Replacement Request sigue en revisión. Si este envío falla, lo
+          // recoge `retryCustomerNotifications` en un sondeo posterior.
+          if (outcome !== undefined && baseUrl !== undefined) {
+            await notifyCustomer(baseUrl, internalSecret, msg.requestId, outcome);
           }
         } else {
           console.log(`Cotización ${msg.requestId} no encontrada.`);

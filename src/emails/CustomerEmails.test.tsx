@@ -222,21 +222,7 @@ describe('el correo de un Outcome sin Quote Document', () => {
     expect(html).toContain('href="https://zamx.example.com"');
   });
 
-  test('lleva la explicación del propio Approver cuando la escribió', async () => {
-    const { text } = await renderEmail(
-      React.createElement(RejectedQuoteEmail, {
-        fullName: 'Ana Márquez',
-        requestId: REQUEST_ID,
-        outcome: 'discontinued',
-        explanation: 'El sustituto es el FN050; pídalo por separado.',
-        language: 'es',
-      })
-    );
-
-    expect(text).toContain('El sustituto es el FN050; pídalo por separado.');
-  });
-
-  test('no deja un hueco vacío cuando el Approver no explicó nada', async () => {
+  test('no lleva ninguna nota: la explicación del registro es un resumen interno', async () => {
     const { text } = await renderEmail(
       React.createElement(RejectedQuoteEmail, {
         fullName: 'Ana Márquez',

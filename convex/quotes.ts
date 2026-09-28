@@ -1,7 +1,7 @@
 import { query, internalMutation, internalQuery } from './_generated/server';
 import { v } from 'convex/values';
 import { computeTotals } from './lib/totals';
-import { isPricedOutcome, type Outcome } from './lib/outcome';
+import { isPricedOutcome, OUTCOMES, type Outcome } from './lib/outcome';
 import { outcomeValidator } from './schema';
 import { drawSuggestedPrice, matchPricingRule } from './lib/pricing';
 import { SUGGESTED_DELIVERY_WEEKS } from './lib/delivery';
@@ -138,8 +138,9 @@ type OutcomeTransition =
   | { kind: 'undecided' };
 
 /**
- * Fija el Outcome de una Replacement Request **sólo si no tiene ninguno**, y
- * reporta cuál de las dos cosas ocurrió.
+ * Fija el Outcome de una Replacement Request **sólo si no tiene ninguno** —o si
+ * el que tiene es `blocked_pending_info`—, y reporta cuál de las dos cosas
+ * ocurrió.
  *
  * La comprobación y la escritura viven en la misma mutación a propósito: una
  * mutación de Convex es una transacción, y separarlas dejaba una carrera con una
@@ -185,11 +186,24 @@ export const processEmployeeResponse = internalMutation({
     // 2. La decisión ya tomada es intocable, y con ella los Confirmed Prices y
     // las palabras del Approver que la acompañaban: sobrescribir la explicación
     // dejaría el registro contando una decisión con las razones de otra.
-    if (quote.outcome !== undefined) {
+    //
+    // Salvo `blocked_pending_info`, que no es una decisión sino una espera: se
+    // le pidió información al Customer, y la respuesta del Approver que llega
+    // después de recibirla es la que decide. Tratarlo como final dejaba la
+    // Request bloqueada para siempre.
+    const reopening = quote.outcome === 'blocked_pending_info';
+
+    if (quote.outcome !== undefined && !reopening) {
       return { kind: 'already_settled', outcome: quote.outcome };
     }
 
     const outcome = args.outcome;
+
+    // Una respuesta que no decide nada no toca una Request que está esperando:
+    // el registro sigue contando por qué se le pidió información al Customer.
+    if (reopening && outcome === undefined) {
+      return { kind: 'undecided' };
+    }
 
     // 3. Confirmar precios y entregas. El Suggested Price nunca se toca: la
     // distancia entre lo propuesto y lo confirmado es la única evidencia de si
@@ -226,10 +240,21 @@ export const processEmployeeResponse = internalMutation({
 
     // 4. Escribir. `outcome` sólo se toca si la clasificación produjo uno, y
     // `customerNotifiedAt` no se toca nunca aquí: son dos hechos independientes.
+    //
+    // Al reabrir, lo que se le notificó al Customer era la petición de
+    // información, no esta decisión: se borra para que la nueva le llegue — y
+    // para que el reintento la vea pendiente si el primer envío falla.
     await ctx.db.patch(quote._id, {
       products,
-      ...(outcome === undefined ? {} : { outcome }),
+      ...(outcome === undefined ? {} : { outcome, outcomeSettledAt: Date.now() }),
       approverExplanation: args.explanation,
+      ...(reopening
+        ? {
+            customerNotifiedAt: undefined,
+            quoteDocumentSentAt: undefined,
+            rejectionExplainedAt: undefined,
+          }
+        : {}),
     });
 
     return outcome === undefined ? { kind: 'undecided' } : { kind: 'settled', outcome };
@@ -247,6 +272,46 @@ export const getByRequestId = internalQuery({
       .query('quotes')
       .withIndex('by_request_id', (q) => q.eq('requestId', args.requestId))
       .first();
+  },
+});
+
+/**
+ * Las Replacement Requests con Outcome a las que todavía no se le dijo nada al
+ * Customer, para reintentar la notificación.
+ *
+ * El envío sale una sola vez desde el sondeo que fija el Outcome, y para
+ * entonces el correo del Approver ya se marcó leído: si ese envío fallaba (un
+ * error de Resend, un arranque en frío de Vercel, `APP_URL` sin configurar) al
+ * Customer no se le avisaba nunca.
+ *
+ * La ventana deja fuera dos cosas. Lo recién fijado, cuyo primer intento puede
+ * seguir en vuelo — reintentarlo mandaría el correo dos veces. Y lo que lleva
+ * días fallando, que ya no se arregla solo reintentando y sólo llenaría el
+ * registro. Las Requests anteriores a `outcomeSettledAt` no lo tienen y quedan
+ * fuera: no se le escribe de golpe a quien ya se atendió a mano.
+ */
+export const pendingCustomerNotifications = internalQuery({
+  args: { settledAfter: v.number(), settledBefore: v.number() },
+  handler: async (ctx, args) => {
+    const pending: { requestId: string; outcome: Outcome }[] = [];
+
+    for (const outcome of OUTCOMES) {
+      const quotes = await ctx.db
+        .query('quotes')
+        .withIndex('by_notification', (q) =>
+          q.eq('customerNotifiedAt', undefined).eq('outcome', outcome)
+        )
+        .take(50);
+
+      for (const quote of quotes) {
+        const settledAt = quote.outcomeSettledAt;
+        if (settledAt === undefined) continue;
+        if (settledAt <= args.settledAfter || settledAt >= args.settledBefore) continue;
+        pending.push({ requestId: quote.requestId, outcome });
+      }
+    }
+
+    return pending;
   },
 });
 

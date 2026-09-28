@@ -23,7 +23,7 @@ export async function POST(req: Request) {
 
     // `requestId` es el código `REQ-XXXXXX` de la Replacement Request, no el
     // `_id` del registro: son dos identificadores distintos.
-    const { requestId, outcome, explanation } = await req.json();
+    const { requestId, outcome } = await req.json();
 
     if (!requestId || !outcome) {
       return NextResponse.json({ success: false, error: 'Faltan datos' }, { status: 400 });
@@ -50,6 +50,12 @@ export async function POST(req: Request) {
     }
 
     const { quote, user } = data;
+
+    // Como en el Quote Document: el reintento del sondeo no duplica un correo
+    // que ya salió.
+    if (quote.rejectionExplainedAt !== undefined) {
+      return NextResponse.json({ success: true, alreadySent: true });
+    }
     // Sin URL público configurado no hay `http://localhost:3000` que valga: ese
     // logo y ese enlace sólo resuelven en la máquina de quien los escribió.
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || undefined;
@@ -64,7 +70,6 @@ export async function POST(req: Request) {
         fullName: user.fullName,
         requestId: quote.requestId || requestId,
         outcome,
-        explanation: explanation || quote.approverExplanation,
         baseUrl,
         language,
       })

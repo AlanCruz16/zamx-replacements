@@ -53,7 +53,7 @@ _Avoid_: employee, admin, sales rep, vendedor
 ### Progress
 
 **Outcome**:
-What an Approver decided about a request: that it is priced as suggested, priced differently, restricted to the original equipment manufacturer, discontinued, or blocked pending more information. A request with no Outcome yet is awaiting review.
+What an Approver decided about a request: that it is priced as suggested, priced differently, restricted to the original equipment manufacturer, discontinued, or blocked pending more information. A request with no Outcome yet is awaiting review. The first Outcome is final, except blocked pending more information: that one is a wait, and the Approver's next decisive reply replaces it.
 _Avoid_: status, state
 
 **Outcome** answers "what did sales decide?" and is independent of whether the Customer has been told yet. Conflating the two is what allowed a discontinued part to be presented as a delivered quote.
