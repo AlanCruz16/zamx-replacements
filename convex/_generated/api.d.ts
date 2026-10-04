@@ -26,6 +26,7 @@ import type * as lib_rate_limit from "../lib/rate_limit.js";
 import type * as lib_reply_verdict from "../lib/reply_verdict.js";
 import type * as lib_request_id from "../lib/request_id.js";
 import type * as lib_supervisor_authority from "../lib/supervisor_authority.js";
+import type * as lib_supervisor_view from "../lib/supervisor_view.js";
 import type * as lib_supervisors from "../lib/supervisors.js";
 import type * as lib_totals from "../lib/totals.js";
 import type * as poller from "../poller.js";
@@ -59,6 +60,7 @@ declare const fullApi: ApiFromModules<{
   "lib/reply_verdict": typeof lib_reply_verdict;
   "lib/request_id": typeof lib_request_id;
   "lib/supervisor_authority": typeof lib_supervisor_authority;
+  "lib/supervisor_view": typeof lib_supervisor_view;
   "lib/supervisors": typeof lib_supervisors;
   "lib/totals": typeof lib_totals;
   poller: typeof poller;

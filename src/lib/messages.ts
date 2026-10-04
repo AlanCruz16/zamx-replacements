@@ -1,4 +1,5 @@
-import type { NotifiableOutcome } from '../../convex/lib/outcome';
+import type { NotifiableOutcome, Outcome } from '../../convex/lib/outcome';
+import type { PeriodPreset } from './supervisor-period';
 
 /**
  * Todo lo que el Customer lee, en los dos idiomas que puede elegir.
@@ -503,6 +504,89 @@ export const SUPERVISOR_MESSAGES = {
   },
   logoAlt: 'Logo ZIEHL-ABEGG',
   comingSoon: 'Esta sección todavía está en construcción.',
+
+  /** El periodo, por fecha de recepción: `supervisor-period.ts`. */
+  period: {
+    label: 'Periodo',
+    presets: {
+      last7: 'Últimos 7 días',
+      last30: 'Últimos 30 días',
+      last90: 'Últimos 90 días',
+      all: 'Todo',
+    } satisfies Record<PeriodPreset, string>,
+  },
+
+  /**
+   * Los Outcomes con las palabras del panel. La espera no es un Outcome: es su
+   * ausencia, y lleva su propia etiqueta.
+   */
+  outcomes: {
+    priced_as_suggested: 'Cotizada al precio sugerido',
+    priced_differently: 'Cotizada con otro precio',
+    oem_restricted: 'Exclusiva del fabricante (OEM)',
+    discontinued: 'Pieza descontinuada',
+    blocked_pending_info: 'Requiere más información',
+  } satisfies Record<Outcome, string>,
+  awaitingReview: 'En revisión',
+
+  /** La lista de Replacement Requests: `RequestList.tsx`. */
+  requests: {
+    columns: {
+      requestId: 'Código',
+      receivedAt: 'Recibida',
+      customer: 'Cliente',
+      company: 'Empresa',
+      parts: 'Piezas',
+      outcome: 'Resultado',
+    },
+    loading: 'Cargando solicitudes…',
+    empty: 'No hay solicitudes en este periodo.',
+    loadMore: 'Cargar más',
+  },
+
+  /** El detalle de una Replacement Request: `RequestDetail.tsx`. */
+  request: {
+    back: 'Volver a las solicitudes',
+    loading: 'Cargando solicitud…',
+    notFound: 'No existe una solicitud con este código.',
+    receivedAt: 'Recibida',
+    customerHeading: 'Cliente',
+    name: 'Nombre',
+    company: 'Empresa',
+    email: 'Correo',
+    phone: 'Teléfono',
+    noPhone: 'Sin teléfono',
+    outcomeHeading: 'Resultado',
+    approverWords: 'Lo que respondió Ventas',
+    noApproverWords: 'Ventas no dejó explicación.',
+    blockedCanChange:
+      'Está detenida hasta que llegue la información que falta: el resultado todavía puede cambiar.',
+    notificationsHeading: 'Qué recibió el Cliente',
+    customerNotifiedAt: 'Se le avisó',
+    quoteDocumentSentAt: 'Cotización enviada',
+    rejectionExplainedAt: 'Rechazo explicado',
+    notYet: 'Todavía no',
+    quoteDocument: 'Cotización (PDF)',
+    hasQuoteDocument: 'Existe',
+    noQuoteDocument: 'No existe',
+    partsHeading: 'Piezas',
+    partColumns: {
+      partNumber: 'Número de parte',
+      model: 'Modelo',
+      quantity: 'Cantidad',
+      destination: 'Destino',
+      suggestedPrice: 'Precio sugerido',
+      confirmedPrice: 'Precio confirmado',
+      suggestedDelivery: 'Entrega sugerida',
+      confirmedDelivery: 'Entrega confirmada',
+    },
+    /** Ningún Model Prefix coincidió: no hay Suggested Price, no es cero. */
+    noSuggestedPrice: 'Sin coincidencia',
+    /** Todavía no hay Confirmed Price, que tampoco es cero. */
+    noConfirmedPrice: 'Sin precio aún',
+    noConfirmedDelivery: 'Sin confirmar',
+    weeks: (min: number, max: number) => (min === max ? `${min} semanas` : `${min}–${max} semanas`),
+  },
 };
 
 /** Las dos ramas, para quien tenga que recorrerlas —o elegir por idioma. */
