@@ -488,6 +488,23 @@ const en: Messages = {
   },
 };
 
+/**
+ * El panel del Supervisor: `src/app/supervisor/`. Va aparte de `es` y `en`
+ * porque sólo existe en español —lo lee el equipo de ZAMX, no un Customer—, y
+ * meterlo en el árbol obligaría a inventarle una rama en inglés que nadie leería.
+ */
+export const SUPERVISOR_MESSAGES = {
+  title: 'Panel del Supervisor',
+  navLabel: 'Secciones del panel',
+  nav: {
+    dashboard: 'Resumen',
+    requests: 'Solicitudes de reemplazo',
+    customers: 'Clientes',
+  },
+  logoAlt: 'Logo ZIEHL-ABEGG',
+  comingSoon: 'Esta sección todavía está en construcción.',
+};
+
 /** Las dos ramas, para quien tenga que recorrerlas —o elegir por idioma. */
 export const MESSAGES: Record<Language, Messages> = { es, en };
 
