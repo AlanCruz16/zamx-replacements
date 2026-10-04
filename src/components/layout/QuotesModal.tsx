@@ -3,7 +3,7 @@
 import React, { useEffect, useId, useRef } from 'react';
 import { useQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
-import { quoteDocumentLines } from '@/lib/quote-document';
+import { quoteDocumentLines } from '../../../convex/lib/quote_document';
 import { outcomeBadge, type BadgeTone } from '@/lib/outcome-badge';
 import { formatCurrency, formatDateTime, messagesFor, resolveLanguage } from '@/lib/messages';
 import { X, FileText, Clock, CheckCircle, AlertCircle, Calendar, Download } from 'lucide-react';

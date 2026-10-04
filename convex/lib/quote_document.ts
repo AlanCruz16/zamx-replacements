@@ -1,6 +1,6 @@
-import { computeTotals, type Totals } from '../../convex/lib/totals';
-import { isPricedOutcome, type Outcome } from '../../convex/lib/outcome';
-import type { Doc } from '../../convex/_generated/dataModel';
+import { computeTotals, type Totals } from './totals';
+import { isPricedOutcome, type Outcome } from './outcome';
+import type { Doc } from '../_generated/dataModel';
 
 /**
  * Cuándo existe un Quote Document, y qué lleva dentro. Las dos condiciones del
@@ -55,6 +55,16 @@ interface ReplacementRequest {
 export function quoteDocumentLines(request: ReplacementRequest): QuoteDocumentContents | null {
   if (!isPricedOutcome(request.outcome)) return null;
   return confirmedQuoteLines(request.products);
+}
+
+/**
+ * Si la Replacement Request tiene Quote Document. Pasa por `quoteDocumentLines`
+ * en vez de repetir las dos condiciones: dos copias de esta regla es como se
+ * llegó a mandar un Quote Document a cero dólares, y el panel del Supervisor
+ * tiene que contestar exactamente lo mismo que la descarga del Customer.
+ */
+export function hasQuoteDocument(request: ReplacementRequest): boolean {
+  return quoteDocumentLines(request) !== null;
 }
 
 /**
