@@ -11,7 +11,7 @@ This repo is **single-context**: one `CONTEXT.md` and one `docs/adr/` at the roo
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
-`CONTEXT.md` exists at the repo root. `docs/adr/` does not exist yet — that is expected and not a problem to fix eagerly.
+`CONTEXT.md` exists at the repo root, and so does `docs/adr/`. Scan the ADR titles before working in an area; each one names the code it governs.
 
 ## File structure
 

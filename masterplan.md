@@ -1,7 +1,14 @@
 # Masterplan: Sistema Automatizado de Cotización de Reemplazos — ZIEHL-ABEGG México
 
-> **Versión:** 2.1  
-> **Última actualización:** 2026-06-05
+> **Versión:** 2.2  
+> **Última actualización:** 2026-10-03
+
+> **Cómo leer este documento.** Es el plan con el que arrancó el proyecto, no una descripción del
+> sistema. La versión 2.2 lo cotejó contra el código: donde la implementación se apartó a propósito,
+> la sección lo dice en un bloque **Corregido (v2.2)**, y lo que sigue siendo intención y no existe
+> está marcado **(no implementado)**. Cuando este documento y el código discrepen, mandan el código,
+> `CONTEXT.md` (el vocabulario: Replacement Request, Suggested Price, Confirmed Price, Outcome,
+> Approver…) y las decisiones de `docs/adr/`.
 
 ---
 
@@ -31,18 +38,18 @@ Una aplicación web con un chatbot conversacional impulsado por IA que:
 
 ## 2. Tech Stack
 
-| Componente            | Tecnología                                   | Justificación                                                                                                   |
-| --------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| **Framework**         | Next.js (App Router, última versión estable) | SSR, API routes, experiencia del equipo                                                                         |
-| **Autenticación**     | Clerk                                        | Email + contraseña. Simple, seguro, manejo de sesiones B2C                                                      |
-| **Base de Datos**     | Convex                                       | DB reactiva, funciones serverless, storage de archivos, tiempo real para el chat                                |
-| **LLM / IA**          | Google Gemini (via Vercel AI SDK)            | Chatbot NLP, parsing de emails, generación de respuestas. API key ya disponible                                 |
-| **Email (envío)**     | Resend + React Email                         | Envío transaccional, templates tipados en React                                                                 |
-| **Email (recepción)** | IMAP Polling (Gmail/Outlook)                 | Sin dominio propio → no se puede usar inbound webhooks. Se usará polling vía IMAP con `imapflow` en un cron job |
-| **PDF**               | `@react-pdf/renderer`                        | Generación server-side del documento de cotización                                                              |
-| **Deployment**        | Vercel                                       | Experiencia del equipo, integración nativa con Next.js                                                          |
-| **Idioma**            | Bilingüe (Español/Inglés)                    | Toggle en UI. Chatbot y cotización en el idioma seleccionado                                                    |
-| **Moneda**            | USD únicamente                               | Todos los precios en dólares americanos                                                                         |
+| Componente            | Tecnología                                   | Justificación                                                                                  |
+| --------------------- | -------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Framework**         | Next.js (App Router, última versión estable) | SSR, API routes, experiencia del equipo                                                        |
+| **Autenticación**     | Clerk                                        | Email + contraseña. Simple, seguro, manejo de sesiones B2C                                     |
+| **Base de Datos**     | Convex                                       | DB reactiva, funciones serverless, storage de archivos, tiempo real para el chat               |
+| **LLM / IA**          | Google Gemini (via Vercel AI SDK)            | Chatbot NLP, parsing de emails, generación de respuestas. API key ya disponible                |
+| **Email (envío)**     | Resend + React Email                         | Envío transaccional, templates tipados en React                                                |
+| **Email (recepción)** | IMAP Polling (Gmail/Outlook)                 | Polling vía IMAP con `imapflow` desde un cron de Convex. La razón original ya no aplica (§2.1) |
+| **PDF**               | `@react-pdf/renderer`                        | Generación server-side del documento de cotización                                             |
+| **Deployment**        | Vercel                                       | Experiencia del equipo, integración nativa con Next.js                                         |
+| **Idioma**            | Bilingüe (Español/Inglés)                    | Toggle en UI. Chatbot y cotización en el idioma seleccionado                                   |
+| **Moneda**            | USD únicamente                               | Todos los precios en dólares americanos                                                        |
 
 ### 2.1 Decisiones Técnicas Clave
 
@@ -52,11 +59,21 @@ Convex maneja todo lo que necesitamos: esquema tipado, funciones serverless (que
 
 #### ¿Por qué IMAP Polling en lugar de Inbound Webhooks?
 
-No tenemos un dominio propio configurado. Los webhooks de Resend requieren un dominio verificado para recibir emails. La alternativa más simple es un cron job que revise una bandeja de correo dedicada cada N minutos usando el protocolo IMAP.
+> **Corregido (v2.2).** La justificación de abajo ya no es cierta: `za.idcn.com.mx` está verificado
+> en Resend y es el dominio desde el que el sistema envía (`src/lib/addresses.ts`). El polling se
+> queda —funciona, y la tubería de respuestas del Approver está construida sobre él— pero ya no
+> porque falte un dominio. Cambiarlo por un webhook entrante sería una decisión nueva y reversible;
+> la que no lo es, responder en prosa en lugar de con un enlace firmado, está en
+> `docs/adr/0002-approvers-approve-by-replying-in-prose.md`.
+>
+> El sondeo es un cron de Convex (`convex/crons.ts` → `internal.emails.checkInbox`) cada **5
+> minutos**, no una ruta de Next.js invocada por Vercel Cron.
+
+_Razón original (histórica):_ No tenemos un dominio propio configurado. Los webhooks de Resend requieren un dominio verificado para recibir emails. La alternativa más simple es un cron job que revise una bandeja de correo dedicada cada N minutos usando el protocolo IMAP.
 
 **Cuenta de email dedicada:** Se creará una cuenta de email (ej. `zamx.replacements@gmail.com`) que será:
 
-- La dirección de **envío** de solicitudes al empleado (Reply-To).
+- El **Reply-To** del correo de cada Replacement Request al Approver. El remitente es `soporte@za.idcn.com.mx`, no esta cuenta.
 - La dirección que el empleado responde.
 - La bandeja que el cron job monitorea para recibir respuestas.
 
@@ -97,8 +114,8 @@ Abstrae la comunicación con Gemini, maneja streaming de respuestas, structured 
        └──────┬───────┘                       │
               │                               │
        ┌──────▼────────────┐    ┌─────────────┴──────┐
-       │ Empleado ZIEHL-   │    │ IMAP Cron Job      │
-       │ ABEGG (Outlook/   │───►│ (Poll cada 2 min)  │
+       │ Approver ZIEHL-   │    │ Cron Convex + IMAP │
+       │ ABEGG (Outlook/   │───►│ (Poll cada 5 min)  │
        │ Gmail)            │    │ Lee respuestas      │
        └───────────────────┘    └─────────────┬──────┘
                                               │
@@ -119,7 +136,7 @@ Abstrae la comunicación con Gemini, maneja streaming de respuestas, structured 
 
 ### Fase 1: Registro / Login del Cliente
 
-**Ruta:** `/` → redirige a `/login` o `/dashboard`
+**Ruta:** `/` → `/sign-in` si no hay sesión; `/onboarding` si el perfil está incompleto
 
 1. El cliente accede a la aplicación.
 2. Si no tiene cuenta, se registra con Clerk proporcionando:
@@ -128,7 +145,7 @@ Abstrae la comunicación con Gemini, maneja streaming de respuestas, structured 
    - Correo electrónico
    - Teléfono (opcional)
 3. Si ya tiene cuenta, inicia sesión con email + contraseña.
-4. Tras autenticarse, se redirige al dashboard del cliente.
+4. Tras autenticarse, llega al chat (`/`).
 
 **Datos almacenados en Convex (`users` table):**
 
@@ -146,11 +163,16 @@ Abstrae la comunicación con Gemini, maneja streaming de respuestas, structured 
 
 > **Nota:** Clerk almacena las credenciales de autenticación. Convex almacena el perfil extendido del usuario (empresa, teléfono, idioma) sincronizado via webhook de Clerk.
 
+> **Corregido (v2.2).** No hay `/dashboard`: el chat vive en `/`, y las páginas de auth son
+> `/sign-in`, `/sign-up` y `/onboarding`. El webhook de Clerk crea el usuario con datos provisionales
+> (empresa `"Pendiente"`), y `/` manda al Customer a `/onboarding` a completar nombre, empresa y
+> teléfono antes de ver el chat. La tabla no tiene `createdAt`; usa el `_creationTime` de Convex.
+
 ---
 
 ### Fase 2: Interacción con el Chatbot
 
-**Ruta:** `/dashboard` → sección principal del chatbot
+**Ruta:** `/` (ver la corrección de la Fase 1)
 
 #### 2.1 Inicio de Conversación
 
@@ -185,17 +207,20 @@ El chatbot (via Gemini + Vercel AI SDK con structured output) debe:
 
 Del `model` proporcionado por el cliente, el sistema debe extraer automáticamente el prefijo para alimentar el algoritmo de precios. La lógica de extracción debe coincidir con las reglas definidas en la tabla `pricing_rules`.
 
+> **Corregido (v2.2).** No se extrae ningún prefijo. Se compara el Model completo contra cada regla
+> activa con `startsWith`, y gana el Model Prefix más largo que encaje (§3.1).
+
 #### 2.5 Prompt del Chatbot (Guía para implementación)
 
 El system prompt del chatbot debe incluir:
 
 - **Rol:** Eres un asistente de ZIEHL-ABEGG México especializado en reemplazos de ventiladores industriales.
 - **Objetivo:** Recopilar número de parte, modelo, cantidad y lugar de entrega.
-- **Instrucciones para ayudar al cliente:** Explicar dónde encontrar la etiqueta del ventilador (generalmente en la carcasa lateral o en la placa de datos).
+- **Instrucciones para ayudar al cliente:** Mostrarle al Customer dónde está la etiqueta del ventilador. En lugar de explicarlo con texto, invoca `show_dataplate_guide` (§7.1).
 - **Idioma:** Responder en el idioma seleccionado por el usuario.
 - **Restricción:** NO dar precios, NO prometer tiempos de entrega. Solo recopilar datos.
 - **Multi-producto:** Permitir que el cliente agregue varios productos. Preguntar "¿Desea cotizar otro producto?" después de cada uno.
-- **Output format:** Cuando el cliente confirme, generar un JSON con el schema `ProductRequest[]`.
+- **Output format:** Cuando el Customer confirme, invocar `submit_quote_request` con los productos (`ProductRequest[]`) como entrada.
 
 ---
 
@@ -227,6 +252,11 @@ El system prompt del chatbot debe incluir:
 
 > **Nota:** En el futuro se agregarán más prefijos desde el panel de administración (post-MVP).
 
+> **Corregido (v2.2).** La tabla de arriba es la siembra del plan. La real está en
+> `convex/init.ts` (`seedData`), tiene 33 reglas (familias `MK`, `QK`, `DN`, `GR`, `RH`, `ZN`…), y sus
+> rangos no coinciden con estos. Por ejemplo, `GR45` va de $2,200 a $2,500. No hay panel de
+> administración: cambiar un rango es editar la tabla en el panel de Convex o la siembra.
+
 **Lógica del cálculo (pseudocódigo):**
 
 ```typescript
@@ -244,188 +274,189 @@ function calculateSuggestedPrice(modelPrefix: string): number | null {
 }
 ```
 
+> **Corregido (v2.2) — los 2 decimales.** El código hace lo que dice esta sección: el Suggested Price
+> se redondea al centavo con `Math.round` (`toCents`, en `convex/lib/totals.ts`). Una versión
+> anterior truncaba con `Math.floor` y ya no lo hace. Dos precisiones sobre el pseudocódigo:
+>
+> - Los extremos del rango se llevan al centavo **hacia dentro** antes del sorteo, para que un máximo
+>   configurado con fracciones de centavo no produzca un precio por encima de él.
+> - Si varias reglas encajan, gana la de **Model Prefix más largo**, y la comparación ignora
+>   mayúsculas y los espacios de los extremos (`matchPricingRule`, en `convex/lib/pricing.ts`).
+>
+> El precio sorteado es el **Suggested Price**: material interno del Approver que nunca llega al
+> Customer. Lo que se cotiza es el **Confirmed Price** que fija el Approver, y los dos se guardan
+> por separado (ver `CONTEXT.md`).
+
 **Manejo de prefijo no encontrado:**
-Si el `model` del cliente no coincide con ningún prefijo en la tabla `pricing_rules`, el chatbot informa al cliente que debe verificar el modelo ingresado. El sistema NO envía la solicitud al empleado con precio "no disponible" — el cliente debe corregir el dato.
+
+> **Corregido (v2.2).** Se hace lo contrario de lo que decía este párrafo. Una pieza cuyo Model no
+> encaja con ninguna regla **sí** se envía al Approver, sin Suggested Price. El correo la marca
+> como pieza a cotizar a mano y el Approver le da un Confirmed Price directamente. La ausencia de
+> Suggested Price significa "no cotizable", nunca "gratis", y ninguna superficie la sustituye por
+> cero. El chatbot sigue validando la _forma_ del Model (dos letras seguidas de números), pero no lo
+> compara contra `pricing_rules`.
+
+_Plan original (no implementado):_ Si el `model` del cliente no coincide con ningún prefijo en la tabla `pricing_rules`, el chatbot informa al cliente que debe verificar el modelo ingresado. El sistema NO envía la solicitud al empleado con precio "no disponible" — el cliente debe corregir el dato.
 
 **IVA (Impuesto al Valor Agregado):**
 
-- Se aplica **IVA del 16%** sobre el precio unitario.
+- Se aplica **IVA del 16%** sobre el subtotal.
 - La cotización debe mostrar: Subtotal, IVA (16%), y Total.
-- Fórmula: `totalConIVA = subtotal * 1.16`
+- Fórmula: `iva = round2(subtotal * 0.16)`, `total = subtotal + iva`, cada cifra al centavo.
+- Los totales **no se guardan**: se derivan al leer (`computeTotals`, en `convex/lib/totals.ts`). La
+  vista del Approver los calcula con Suggested Prices y el Quote Document con Confirmed Prices.
 
-#### 3.2 Tiempo de Entrega por Temporada
+#### 3.2 Delivery Estimate
 
-| Temporada | Meses                              | Tiempo de Entrega |
-| --------- | ---------------------------------- | ----------------- |
-| **Alta**  | Abril — Septiembre (meses 4-9)     | **12 semanas**    |
-| **Baja**  | Octubre — Marzo (meses 10-12, 1-3) | **8 semanas**     |
+> **Corregido (v2.2).** Los tiempos de entrega por temporada se **eliminaron**; no están
+> aplazados. Lo que gobierna la entrega es la capacidad de fábrica, no el calendario, y una tabla de
+> temporadas que contradice la realidad por unas veinte semanas es peor que no tener ninguna. La
+> tabla `delivery_seasons`, su siembra y la búsqueda por mes ya no existen. Volver a fechas por
+> temporada sería trabajo nuevo con una decisión nueva detrás, no la reactivación de esto.
 
-**Tabla `delivery_seasons` en Convex:**
+- La Delivery Estimate es un **rango de semanas enteras** (mínimo y máximo), nunca una fecha. Una
+  cifra única acordada es un rango cuyo mínimo y máximo coinciden.
+- El valor sugerido por defecto es **25–30 semanas**, igual para todas las piezas.
+- Es **configuración**, no lógica: `SUGGESTED_DELIVERY_WEEKS` en `convex/lib/delivery.ts`.
+  Cambiarlo es editar esa línea y desplegar. No vive en una tabla a propósito (el comentario del
+  módulo explica por qué).
+- Como el precio, tiene forma sugerida y forma confirmada. El Approver puede sustituirla con un
+  Delivery Estimate **para toda la Replacement Request**. Se guarda en cada pieza, pero se fija el mismo para todas.
 
-```typescript
-{
-  seasonName: string,        // "high" | "low"
-  startMonth: number,        // 4 (Abril) para alta, 10 (Octubre) para baja
-  endMonth: number,          // 9 (Septiembre) para alta, 3 (Marzo) para baja
-  deliveryWeeks: number,     // 12 para alta, 8 para baja
-  isActive: boolean,
-}
-```
+_Plan original (eliminado):_ temporada alta abril–septiembre, 12 semanas; temporada baja
+octubre–marzo, 8 semanas; tabla `delivery_seasons` con `startMonth`/`endMonth`.
 
-**Lógica:**
+#### 3.3 Envío del Email al Approver
 
-```typescript
-function getDeliveryWeeks(): number {
-  const currentMonth = new Date().getMonth() + 1; // 1-12
-  // Temporada alta: Abril (4) a Septiembre (9)
-  if (currentMonth >= 4 && currentMonth <= 9) return 12;
-  // Temporada baja: Octubre (10) a Marzo (3)
-  return 8;
-}
-```
+> **Corregido (v2.2).** El bosquejo original de este correo (asunto `[ZAMX-REQ-…]`, entregas de
+> "12 semanas", un formato `Producto 1: $NuevoPrecio, Entrega: N semanas`, aprobar con "OK o
+> cualquier confirmación") no describía el correo real, y se quitó. El correo es
+> `src/emails/QuoteRequestTemplate.tsx`, enviado desde `src/app/api/chat/route.ts` cuando el
+> Customer confirma sus piezas.
 
-#### 3.3 Envío del Email al Empleado
+**Destinatario:** la dirección de `ADMIN_EMAIL` (variable de entorno, no tabla). La autoridad
+para _responder_ es otra cosa: la tiene cualquier dirección de `APPROVER_EMAILS`, y si esa variable
+falta, sólo `ADMIN_EMAIL` (`convex/lib/approvers.ts`).
 
-**Destinatario:** Un único empleado de ventas (dirección configurada en Convex como variable de entorno o en tabla `system_config`).
+**Remitente y Reply-To:** sale de `soporte@za.idcn.com.mx`, con Reply-To al buzón que sondea el
+cron (`IMAP_USER`).
 
-**Estructura del correo:**
+**Asunto:** `Nueva solicitud de cotización: [REQ-XXXXXX]`. El código `REQ-` es lo único que enlaza
+la respuesta con la Replacement Request. Identifica, pero **no da autoridad**: conocerlo no basta
+para mover nada.
 
-```
-Asunto: [ZAMX-REQ-{requestId}] Nueva solicitud de reemplazo — {companyName}
+**Contenido:**
 
-Cuerpo:
-────────────────────────────────
-NUEVA SOLICITUD DE REEMPLAZO
-Solicitud ID: {requestId}
-────────────────────────────────
+- Datos del Customer: nombre, empresa, correo y teléfono.
+- Por pieza: Model, número de parte, cantidad, lugar de entrega, Suggested Price por unidad (o
+  "ninguno") y Delivery Estimate sugerida (25–30 semanas).
+- Las piezas sin Suggested Price se marcan aparte y se le pide al Approver un precio para ellas.
+- Subtotal, IVA (16%) y total **estimados**, que excluyen las piezas sin Suggested Price.
+- Todas las cifras en USD, y se le pide responder en USD.
 
-DATOS DEL CLIENTE:
-• Nombre: {fullName}
-• Empresa: {companyName}
-• Email: {clientEmail}
-• Teléfono: {phone}
+**Instrucciones para responder: una por Outcome.**
 
-PRODUCTOS SOLICITADOS:
-┌─────┬──────────────────────────┬──────────┬──────────────────────┐
-│  #  │ Número de Parte / Modelo │ Cantidad │ Lugar de Entrega     │
-├─────┼──────────────────────────┼──────────┼──────────────────────┤
-│  1  │ 162562 / GR45-XXX...     │ 5        │ Monterrey, NL        │
-│  2  │ 162563 / GR50-XXX...     │ 2        │ CDMX                 │
-└─────┴──────────────────────────┴──────────┴──────────────────────┘
+- Aprobar los Suggested Prices y la Delivery Estimate tal cual.
+- Cambiar precios: una línea por pieza con su número de parte y el precio en USD. El ejemplo usa
+  la primera pieza de esa misma Replacement Request con su Suggested Price real (o `$PRECIO USD` si
+  no lo tiene). Sólo cambian las piezas mencionadas.
+- Cambiar la Delivery Estimate: una sola para toda la Replacement Request, no una por pieza.
+- Restringida al fabricante original (OEM), o descontinuada. Cualquiera de las dos cierra la
+  Replacement Request **entera** sin Quote Document, porque el Outcome es uno por Replacement Request.
+- Falta información: la palabra clave y luego lo que se necesita del Customer.
 
-PRECIOS Y TIEMPOS SUGERIDOS:
-• Producto 1: $2,547.83 USD/unidad — Entrega: 12 semanas
-• Producto 2: $2,634.19 USD/unidad — Entrega: 12 semanas
-• Subtotal: $17,007.53 USD
-• IVA (16%): $2,721.20 USD
-• Total sugerido: $19,728.73 USD
+Las palabras exactas **no se copian aquí a propósito.** El correo que las enseña y el prompt del
+intérprete que las lee salen los dos de `src/lib/reply-vocabulary.ts`, y una prueba comprueba que
+coinciden. Cuando estaban escritas a mano en dos sitios se separaron, y un «Aprobado» de una sola
+palabra dejó de clasificar (ticket 28). Una tercera copia aquí volvería a invitar a lo mismo.
 
-────────────────────────────────
-INSTRUCCIONES PARA RESPONDER:
-────────────────────────────────
-
-<!--
-  El bosquejo de abajo es de este plan y ya no es la fuente: el vocabulario que
-  el correo enseña y el que el intérprete lee salen los dos de
-  `src/lib/reply-vocabulary.ts`. Estuvo escrito a mano en dos sitios y se
-  separó, y una respuesta de una palabra dejó de clasificar (ticket 28); una
-  tercera copia aquí volvería a invitar a lo mismo.
--->
-
-
-✅ Si APRUEBA todos los precios y tiempos sugeridos:
-   Responda con: "Aprobado" o "OK" o cualquier confirmación.
-
-✏️ Si desea MODIFICAR precio o tiempo de entrega:
-   Responda con el formato:
-   Producto 1: $NuevoPrecio, Entrega: N semanas
-   Producto 2: $NuevoPrecio, Entrega: N semanas
-
-❌ Si la pieza NO ESTÁ DISPONIBLE para venta al público (exclusiva OEM):
-   Responda con: "OEM" o "No disponible al público"
-
-🚫 Si la pieza está DESCONTINUADA / OBSOLETA:
-   Responda con: "Obsoleto" o "Descontinuado"
-
-❓ Si FALTA INFORMACIÓN TÉCNICA:
-   Responda con: "Falta info:" seguido de lo que necesita del cliente.
-
-────────────────────────────────
-```
-
-**Dirección Reply-To:** La cuenta de email dedicada del sistema (`zamx.replacements@gmail.com`) para que cuando el empleado responda, el cron job pueda leerlo.
-
-**Tracking:** El `requestId` en el asunto permite correlacionar la respuesta del empleado con la solicitud en Convex.
+**Respuesta en prosa, no enlace.** Por qué el Approver responde con texto libre en vez de pulsar
+un enlace firmado, y lo que eso cuesta, está en
+`docs/adr/0002-approvers-approve-by-replying-in-prose.md`.
 
 ---
 
-### Fase 4: Recepción e Interpretación de la Respuesta del Empleado
+### Fase 4: Recepción e Interpretación de la Respuesta del Approver
 
-#### 4.1 IMAP Polling (Cron Job)
+> **Corregido (v2.2).** Esta fase se reescribió entera. El diseño original (ruta de Next.js con
+> Vercel Cron, marcar leído antes de interpretar, el cuerpo del correo interpolado en el prompt,
+> estado `pending_review`) era justo lo que dejaba que cualquier correo moviera una Replacement
+> Request, que una instrucción en el cuerpo de un correo se obedeciera, y que una respuesta se
+> perdiera sin que nadie se enterara. Por qué existe toda esta contención, y por qué no se sustituyó
+> por un enlace firmado: `docs/adr/0002-approvers-approve-by-replying-in-prose.md`.
 
-**Implementación:** Una API route de Next.js (`/api/cron/check-email`) invocada periódicamente (cada 2-3 minutos) usando Vercel Cron Jobs.
+#### 4.1 Sondeo del buzón
+
+**Implementación:** una acción de Convex (`internal.emails.checkInbox`, en `convex/emails.ts`),
+programada cada **5 minutos** en `convex/crons.ts`. No es una ruta de Next.js ni un Vercel Cron.
 
 **Flujo:**
 
-1. Conectar a la bandeja de entrada via IMAP (usando `imapflow`).
-2. Buscar emails no leídos cuyo asunto contenga `[ZAMX-REQ-`.
-3. Para cada email encontrado:
-   a. Extraer el `requestId` del asunto.
-   b. Extraer el cuerpo del email (texto plano).
-   c. Marcar como leído.
-   d. Enviar a Gemini para interpretación.
-4. Desconectar.
+1. Conectar al buzón (`IMAP_USER`) con `imapflow` y leer los mensajes **no leídos**.
+2. **Filtrar** cada mensaje (`screenInboundMessage`, en `convex/lib/reply_verdict.ts`):
+   - sin un código `REQ-` en el asunto → no es para esta tubería, y se deja sin leer;
+   - con código, pero el remitente no está en la lista de Approvers → se registra con su dirección y
+     **se deja sin leer**. Añadir al Approver legítimo y esperar al siguiente sondeo lo recupera.
+3. Pasar el cuerpo al intérprete (4.2), sin la cadena citada, y decidir con las reglas de 4.3.
+4. **Marcar leído sólo lo que ya se resolvió** (aplicado, duplicado o ya resuelto). Un fallo del
+   intérprete, de la red o de la mutación deja el mensaje sin leer para el siguiente sondeo
+   (`convex/lib/inbox_seen.ts`).
+5. En el mismo sondeo, reintentar las notificaciones al Customer que quedaron pendientes (5.2).
+
+Si el buzón no se puede abrir, el fallo se registra en `poller_health`, y un apagón sostenido manda
+un aviso por correo (`convex/lib/poller_health.ts`, `/api/send-poller-alert`).
 
 #### 4.2 Interpretación con LLM (Gemini)
 
-**Prompt de interpretación para Gemini:**
+`src/lib/gemini-parser.ts`, con `generateObject` del AI SDK, `gemini-3.1-flash-lite` y
+`temperature: 0`.
 
-```
-Eres un sistema de ZIEHL-ABEGG México. Analiza la respuesta del empleado
-a una solicitud de cotización de reemplazo.
+- **El cuerpo del correo es dato, nunca instrucción.** Entra como mensaje de usuario y nunca se
+  interpola en el prompt de sistema. El prompt de sistema lleva la Replacement Request y el
+  vocabulario de respuesta de `src/lib/reply-vocabulary.ts`.
+- **La clasificación usa los literales del Outcome:** `priced_as_suggested`,
+  `priced_differently`, `oem_restricted`, `discontinued` o `blocked_pending_info`. Ojo: el
+  `z.enum` del intérprete es una lista escrita a mano con esos mismos valores, no derivada de
+  `OUTCOMES` (`convex/lib/outcome.ts`). Un Outcome nuevo hay que añadirlo en los dos sitios.
+- Devuelve además una confianza (que se acota a 0–1 antes de usarla), una explicación, y, si los
+  hay, precios nuevos **por número de parte** y una Delivery Estimate nueva para toda la Replacement Request.
 
-Solicitud original:
-{datos_originales_del_request}
+_Plan original (eliminado):_ un prompt con `{cuerpo_del_email}` interpolado y las categorías
+`approved` / `modified` / `oem_exclusive` / `obsolete` / `needs_info`.
 
-Respuesta del empleado:
-{cuerpo_del_email}
+#### 4.3 Qué se hace con la respuesta
 
-Clasifica la respuesta en UNA de estas categorías y extrae los datos relevantes:
+Las reglas viven en una función pura (`verdictForReply`, en `convex/lib/reply_verdict.ts`). El Outcome
+se fija en **una sola mutación atómica**: el sondeo puede correr en paralelo consigo mismo, y la
+comprobación "¿ya tiene Outcome?" y la escritura no pueden separarse.
 
-1. "approved" — El empleado aprueba precios y tiempos sugeridos.
-   Datos: ninguno adicional.
+| Outcome                | Qué recibe el Customer                                                                     |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
+| `priced_as_suggested`  | Quote Document en PDF con los Suggested Prices como Confirmed Prices                       |
+| `priced_differently`   | Quote Document en PDF con los Confirmed Prices y la Delivery Estimate del Approver         |
+| `oem_restricted`       | Correo explicando que la pieza es exclusiva del fabricante original. No hay Quote Document |
+| `discontinued`         | Correo explicando que la pieza está descontinuada. No hay Quote Document                   |
+| `blocked_pending_info` | Correo pidiéndole la información que falta                                                 |
 
-2. "modified" — El empleado modifica precio y/o tiempo de entrega.
-   Datos: array de { productIndex, newPriceUSD?, newDeliveryWeeks? }
+Los correos sin Quote Document son **plantillas fijas** por idioma (`src/lib/messages.ts`), no texto
+generado por el modelo, y nunca incluyen la explicación del intérprete.
 
-3. "oem_exclusive" — La pieza no está disponible para venta al público.
-   Datos: { message: "razón del empleado" }
+**Cuándo no se aplica, y se le contesta al Approver** (`/api/send-approver-reply`) en lugar de
+callar:
 
-4. "obsolete" — La pieza está descontinuada.
-   Datos: { message: "razón del empleado" }
+- confianza por debajo de **0.7** (`CONFIDENCE_THRESHOLD`);
+- un precio fuera de **0.5×–2×** su Suggested Price. Una pieza sin Suggested Price acepta el
+  precio que se dé;
+- un precio para un número de parte que no está en la Replacement Request;
+- un Outcome con precio que dejaría alguna pieza sin Confirmed Price;
+- la Replacement Request ya tenía Outcome (y éste no cambia).
 
-5. "needs_info" — El empleado necesita más información técnica del cliente.
-   Datos: { missingInfo: "qué necesita saber" }
+En los cuatro primeros casos la Replacement Request sigue **sin Outcome** (en revisión) y al
+Customer no se le dice nada. No existe un estado `pending_review`: la espera es la ausencia de Outcome.
 
-Responde ÚNICAMENTE en formato JSON:
-{
-  "classification": "approved" | "modified" | "oem_exclusive" | "obsolete" | "needs_info",
-  "data": { ... },
-  "confidence": 0.0-1.0
-}
-```
-
-#### 4.3 Acciones según Clasificación
-
-| Clasificación   | Acción                                                                                                                                 |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `approved`      | Usar precios/tiempos sugeridos → Generar cotización PDF → Enviar al cliente                                                            |
-| `modified`      | Usar precios/tiempos del empleado → Generar cotización PDF → Enviar al cliente                                                         |
-| `oem_exclusive` | Enviar email al cliente explicando que la pieza es exclusiva OEM. Mensaje amable generado por Gemini basado en template configurable   |
-| `obsolete`      | Enviar email al cliente explicando que la pieza está descontinuada. Mensaje amable generado por Gemini basado en template configurable |
-| `needs_info`    | Enviar email al cliente solicitando la información faltante. También notificar en el chatbot si el cliente está conectado              |
-
-**Umbral de confianza:** Si `confidence < 0.7`, NO procesar automáticamente. Marcar el request como `"pending_review"` y notificar al empleado que su respuesta no fue interpretada correctamente.
+**Primera respuesta gana.** Una vez fijado, el Outcome es final, con una excepción:
+`blocked_pending_info` es una espera, y la siguiente respuesta decisiva del Approver lo sustituye.
+Las palabras del Approver se guardan junto al Outcome (`approverExplanation`).
 
 ---
 
@@ -450,6 +481,22 @@ Responde ÚNICAMENTE en formato JSON:
 - **NO incluir** las descripciones técnicas largas del ventilador (en el original ocupa casi 2 páginas). Las cotizaciones de reemplazo son más simples: solo número de parte, cantidad, precio.
 - La firma será mucho más sencilla: nota de generación automática + nombre del empleado que confirmó.
 - La cotización de reemplazo debe caber en **1 sola página** (máximo 2 si hay muchos productos).
+
+> **Corregido (v2.2).** La especificación de abajo sigue siendo la referencia de _estilo_ y se
+> respetó en lo esencial (`src/components/pdf/QuoteDocument.tsx`, textos en `src/lib/messages.ts`).
+> El documento real se aparta en esto:
+>
+> - **Sólo existe con un Outcome con precio** (`priced_as_suggested` o `priced_differently`) y
+>   Confirmed Price en todas las piezas. Nunca lleva un Suggested Price.
+> - El número de cotización es el código `REQ-XXXXXX` de la Replacement Request; no hay un
+>   `ZAMX-Q-…` aparte ni un "n° de cliente". Tampoco hay paginación "página: 1 | 1".
+> - La línea de origen es `ZIEHL-ABEGG MEXICO | San Pedro Garza García, NL, México`, no la de
+>   Winston-Salem.
+> - El contacto y la firma son **Ventas ZAMX** (`QUOTE_CONTACT`, en `src/lib/addresses.ts`), no el
+>   nombre del Approver que confirmó. El cierre añade a qué correo escribir para hacer la orden.
+> - El tiempo de entrega es un **rango**: "Tiempo de entrega: 25 a 30 semanas". Si las piezas
+>   tuvieran Delivery Estimates distintas, va una por pieza.
+> - Está en el idioma del Customer (español o inglés), fechas incluidas.
 
 **Especificación Visual Detallada (extraída del PDF oficial):**
 
@@ -559,178 +606,100 @@ Su divulgación no está autorizada.
 
 #### 5.2 Envío al Cliente
 
-- **Vía Resend:** Se envía un correo formal con:
-  - Asunto: `Su cotización ZAMX-Q-{quoteId} de ZIEHL-ABEGG México`
+- **Vía Resend** (`/api/send-client-quote`, desde `cotizaciones@za.idcn.com.mx`), en el idioma del
+  Customer:
+  - Asunto: `Su cotización REQ-XXXXXX de ZIEHL-ABEGG México`
   - Cuerpo: Mensaje amable confirmando la cotización + resumen.
-  - Adjunto: PDF de la cotización.
-- **En el Chatbot:** Si el cliente tiene una sesión activa, se muestra la cotización directamente en el chat.
-- **En el Historial:** La cotización se guarda en Convex asociada al usuario.
+  - Adjunto: el Quote Document en PDF, `Cotizacion_REQ-XXXXXX.pdf`.
+- **En el Historial:** la Replacement Request se guarda en Convex, asociada al Customer. Desde la
+  lista de sus Replacement Requests el Customer ve el Outcome de cada una y descarga el Quote
+  Document de las que lo tienen (`/api/download-quote`).
+
+> **Corregido (v2.2).**
+>
+> - **El Quote Document no se guarda.** Se genera al vuelo cada vez que se adjunta o se descarga. Guardarlo en
+>   Convex Storage se aplazó a propósito, y el campo `pdfStorageId` se quitó del esquema.
+> - **La notificación se reintenta.** Que se fijara el Outcome y que se avisara al Customer son
+>   hechos separados (`outcomeSettledAt`, `customerNotifiedAt`). Si el envío falla, cada sondeo del
+>   buzón lo reintenta: a partir de 10 minutos del Outcome y durante 3 días.
+> - _No implementado:_ mostrar el Quote Document dentro del chat cuando el Customer tiene la sesión
+>   abierta. La lista de Replacement Requests es reactiva, así que el Outcome aparece ahí sin
+>   recargar, pero no en la conversación.
 
 ---
 
 ## 5. Modelo de Datos (Schema de Convex)
 
-### 5.1 Tablas Principales
+### 5.1 Tablas
 
-```typescript
-// convex/schema.ts
-import { defineSchema, defineTable } from 'convex/server';
-import { v } from 'convex/values';
+> **Corregido (v2.2).** El esquema del plan original (con `chatSessions.status`,
+> `replacementRequests` y `quotes` como tablas separadas, un `status` de nueve valores, totales
+> guardados, `deliverySeasons`, `specialResponseTemplates` y `systemConfig`) no es el que se
+> construyó, y se quitó de aquí para que no se lea como tal. La fuente es `convex/schema.ts`, que
+> documenta cada campo. Resumen:
 
-export default defineSchema({
-  // Perfil extendido del usuario (sync con Clerk)
-  users: defineTable({
-    clerkId: v.string(),
-    fullName: v.string(),
-    companyName: v.string(),
-    email: v.string(),
-    phone: v.optional(v.string()),
-    preferredLanguage: v.union(v.literal('es'), v.literal('en')),
-    createdAt: v.number(),
-  }).index('by_clerkId', ['clerkId']),
+| Tabla                | Qué guarda                                                                                                                                                                                    |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `users`              | Perfil del Customer sincronizado con Clerk: nombre, empresa, correo, teléfono, idioma preferido                                                                                               |
+| `quotes`             | Una fila por **Replacement Request** (el nombre de la tabla es anterior al glosario). Código `REQ-XXXXXX`, las piezas, el Outcome y las marcas de tiempo de lo que se le notificó al Customer |
+| `pricing_rules`      | Rangos de precio por Model Prefix                                                                                                                                                             |
+| `chat_sessions`      | Una conversación del chat; `submittedAt` o `abandonedAt` la cierran                                                                                                                           |
+| `chat_messages`      | Los mensajes, con sus `parts[]` del AI SDK tal cual                                                                                                                                           |
+| `poller_health`      | Una fila: salud del sondeo del buzón y si ya se avisó del apagón en curso                                                                                                                     |
+| `rate_limit_windows` | Ventanas del rate limiting del chat por Customer                                                                                                                                              |
 
-  // Sesiones de chat
-  chatSessions: defineTable({
-    userId: v.id('users'),
-    status: v.union(
-      v.literal('active'), // Chat en progreso
-      v.literal('data_collected'), // Datos recopilados, pendiente envío
-      v.literal('pending_employee'), // Esperando respuesta del empleado
-      v.literal('quoted'), // Cotización enviada
-      v.literal('special_case'), // Caso especial (OEM, obsoleto, etc.)
-      v.literal('needs_info') // Falta información
-    ),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  }).index('by_userId', ['userId']),
+Las reglas de forma que importan:
 
-  // Mensajes del chat
-  chatMessages: defineTable({
-    sessionId: v.id('chatSessions'),
-    role: v.union(v.literal('user'), v.literal('assistant'), v.literal('system')),
-    content: v.string(),
-    timestamp: v.number(),
-  }).index('by_sessionId', ['sessionId']),
-
-  // Solicitudes de reemplazo (cada sesión puede tener una solicitud con múltiples productos)
-  replacementRequests: defineTable({
-    sessionId: v.id('chatSessions'),
-    userId: v.id('users'),
-    products: v.array(
-      v.object({
-        partNumber: v.string(),
-        modelPrefix: v.string(),
-        quantity: v.number(),
-        deliveryLocation: v.string(),
-        suggestedPriceUSD: v.optional(v.number()), // Precio random generado
-        finalPriceUSD: v.optional(v.number()), // Precio aprobado/modificado por empleado
-        suggestedDeliveryWeeks: v.optional(v.number()),
-        finalDeliveryWeeks: v.optional(v.number()),
-      })
-    ),
-    status: v.union(
-      v.literal('pending_calculation'),
-      v.literal('sent_to_employee'),
-      v.literal('employee_approved'),
-      v.literal('employee_modified'),
-      v.literal('oem_exclusive'),
-      v.literal('obsolete'),
-      v.literal('needs_info'),
-      v.literal('quoted'),
-      v.literal('pending_review') // Baja confianza en interpretación
-    ),
-    employeeEmailSentAt: v.optional(v.number()),
-    employeeResponseAt: v.optional(v.number()),
-    employeeResponseRaw: v.optional(v.string()),
-    employeeResponseClassification: v.optional(v.string()),
-    specialCaseMessage: v.optional(v.string()),
-    createdAt: v.number(),
-    updatedAt: v.number(),
-  })
-    .index('by_userId', ['userId'])
-    .index('by_sessionId', ['sessionId'])
-    .index('by_status', ['status']),
-
-  // Cotizaciones generadas
-  quotes: defineTable({
-    requestId: v.id('replacementRequests'),
-    userId: v.id('users'),
-    quoteNumber: v.string(), // "ZAMX-Q-XXXX"
-    pdfStorageId: v.optional(v.id('_storage')), // PDF guardado en Convex Storage
-    subtotalUSD: v.number(), // Suma de (precio * cantidad) por producto
-    ivaAmount: v.number(), // subtotal * 0.16
-    totalAmountUSD: v.number(), // subtotal + IVA
-    confirmedByEmployee: v.string(), // Nombre del empleado que confirmó precios
-    validUntil: v.number(), // timestamp (fecha + 30 días)
-    sentToClientAt: v.optional(v.number()),
-    createdAt: v.number(),
-  })
-    .index('by_userId', ['userId'])
-    .index('by_requestId', ['requestId']),
-
-  // ─── TABLAS DE CONFIGURACIÓN ───
-
-  // Reglas de precios por prefijo de modelo (RANGO para generación aleatoria)
-  pricingRules: defineTable({
-    prefix: v.string(), // Ej: "GR45", "GR50", "GR56"
-    minPriceUSD: v.number(), // Precio mínimo del rango
-    maxPriceUSD: v.number(), // Precio máximo del rango
-    description: v.optional(v.string()),
-    isActive: v.boolean(),
-  }).index('by_prefix', ['prefix']),
-
-  // Configuración de temporadas de entrega
-  deliverySeasons: defineTable({
-    seasonName: v.string(), // "high" | "low"
-    startMonth: v.number(), // 1-12
-    endMonth: v.number(), // 1-12
-    deliveryWeeks: v.number(),
-    isActive: v.boolean(),
-  }),
-
-  // Templates de respuesta para casos especiales
-  specialResponseTemplates: defineTable({
-    caseType: v.string(), // "oem_exclusive" | "obsolete" | "needs_info"
-    templateES: v.string(), // Template en español
-    templateEN: v.string(), // Template en inglés
-    description: v.string(),
-    isActive: v.boolean(),
-  }).index('by_caseType', ['caseType']),
-
-  // Configuración del sistema
-  systemConfig: defineTable({
-    key: v.string(), // "employee_email", "imap_check_interval", etc.
-    value: v.string(),
-    description: v.optional(v.string()),
-  }).index('by_key', ['key']),
-});
-```
+- **Suggested Price y Confirmed Price son campos separados y permanentes** de cada pieza, igual que la
+  Delivery Estimate sugerida y la confirmada (mín./máx. en semanas). Fijar un Confirmed Price nunca
+  toca el Suggested Price.
+- **Ausencia significa algo**: sin Suggested Price, la pieza no es cotizable; sin Confirmed Price,
+  todavía no hay precio (nunca cero); sin Outcome, la Replacement Request está en revisión.
+- **Outcome y notificación al Customer son independientes.** `outcome` es lo que decidió el Approver;
+  `customerNotifiedAt`, `quoteDocumentSentAt` y `rejectionExplainedAt` son lo que se le dijo al
+  Customer. Ninguna superficie deduce uno del otro.
+- **Los totales no se guardan**; se derivan (§3.1).
+- La validez del Quote Document es `expiresAt`, 30 días desde la creación.
+- La configuración que no es `pricing_rules` vive en variables de entorno (§8) o como constante en
+  código (`convex/lib/delivery.ts`). No hay tablas `systemConfig` ni `specialResponseTemplates`.
 
 ---
 
 ## 6. Rutas y API Endpoints
 
+> **Corregido (v2.2).** Las tablas reflejan las rutas que existen. Las del plan original que no se
+> construyeron (`/dashboard/*`, `/api/send-employee-email`, `/api/cron/check-email`,
+> `/api/generate-quote-pdf`, `/api/webhooks/clerk`) se quitaron.
+
 ### 6.1 Páginas (App Router)
 
-| Ruta                           | Descripción                                  | Auth |
-| ------------------------------ | -------------------------------------------- | ---- |
-| `/`                            | Landing page + redirect a login              | No   |
-| `/sign-in`                     | Login con Clerk                              | No   |
-| `/sign-up`                     | Registro con Clerk                           | No   |
-| `/dashboard`                   | Dashboard del cliente: chatbot + historial   | Sí   |
-| `/dashboard/history`           | Lista de cotizaciones pasadas                | Sí   |
-| `/dashboard/history/[quoteId]` | Detalle de una cotización (visualizador PDF) | Sí   |
+| Ruta          | Descripción                                                                                         | Auth |
+| ------------- | --------------------------------------------------------------------------------------------------- | ---- |
+| `/`           | El chat del Customer. La lista de sus Replacement Requests se abre como diálogo desde la navegación | Sí   |
+| `/sign-in`    | Login con Clerk                                                                                     | No   |
+| `/sign-up`    | Registro con Clerk                                                                                  | No   |
+| `/onboarding` | Completar nombre, empresa y teléfono tras el registro                                               | Sí   |
 
-### 6.2 API Routes
+### 6.2 API Routes (Next.js)
 
-| Ruta                       | Método | Descripción                                          |
-| -------------------------- | ------ | ---------------------------------------------------- |
-| `/api/chat`                | POST   | Streaming endpoint para el chatbot (Vercel AI SDK)   |
-| `/api/send-employee-email` | POST   | Envía solicitud al empleado via Resend               |
-| `/api/cron/check-email`    | GET    | Cron job: revisa bandeja IMAP, interpreta respuestas |
-| `/api/generate-quote-pdf`  | POST   | Genera PDF de cotización                             |
-| `/api/send-client-quote`   | POST   | Envía cotización al cliente via Resend               |
-| `/api/webhooks/clerk`      | POST   | Sync de usuarios Clerk → Convex                      |
+| Ruta                        | Método | Quién la llama              | Descripción                                                                      |
+| --------------------------- | ------ | --------------------------- | -------------------------------------------------------------------------------- |
+| `/api/chat`                 | POST   | El navegador (Clerk)        | Chat en streaming; al confirmar, crea la Replacement Request y avisa al Approver |
+| `/api/download-quote`       | GET    | El navegador (Clerk)        | El Quote Document de una Replacement Request propia, generado al vuelo           |
+| `/api/send-client-quote`    | POST   | El sondeo (secreto interno) | Manda el Quote Document al Customer                                              |
+| `/api/send-rejection-email` | POST   | El sondeo (secreto interno) | Explica al Customer un Outcome sin Quote Document                                |
+| `/api/send-approver-reply`  | POST   | El sondeo (secreto interno) | Le contesta al Approver lo que no se pudo aplicar                                |
+| `/api/send-poller-alert`    | POST   | El sondeo (secreto interno) | Avisa de un apagón sostenido del buzón                                           |
+| `/api/debug-imap`           | GET    | Desarrollo                  | Lista el buzón. Responde 404 en producción                                       |
+
+Las rutas de "secreto interno" exigen `INTERNAL_API_SECRET` (`src/lib/internal-routes.ts`,
+`src/proxy.ts`).
+
+### 6.3 HTTP Actions (Convex)
+
+`convex/http.ts` expone `/clerk` (el webhook de Clerk, verificado con `CLERK_WEBHOOK_SECRET`) y las
+rutas `/internal/*` por las que Next.js llega a las funciones internas de Convex, también tras
+`INTERNAL_API_SECRET`.
 
 ---
 
@@ -738,14 +707,21 @@ export default defineSchema({
 
 ### 7.1 Chatbot (Recopilación de Datos)
 
-**Modelo:** Gemini (via Vercel AI SDK)  
-**Modo:** Streaming con structured output
+**Modelo:** `gemini-3.1-flash-lite` (via Vercel AI SDK v6, `streamText`)  
+**Modo:** Streaming con tool calling
 
-**Herramientas (Tool Calling) del chatbot:**
+**Herramientas (Tool Calling) del chatbot** (`src/app/api/chat/route.ts`):
 
-1. `extractProductData` — Extrae y valida número de parte, modelo, cantidad y lugar de entrega del mensaje del usuario.
-2. `confirmOrder` — Confirma con el usuario todos los productos recopilados antes de enviar al empleado.
-3. `submitRequest` — Envía la solicitud completa al backend para procesamiento.
+1. `submit_quote_request`: se invoca cuando el Customer confirmó todas sus piezas y dijo que no
+   añade más. Crea la Replacement Request, le manda el correo al Approver y cierra la conversación
+   (`chat_sessions.submittedAt`).
+2. `show_dataplate_guide`: muestra la guía visual de dónde está la placa de datos. Es obligatoria en
+   lugar de explicarlo con texto.
+
+> **Corregido (v2.2).** La extracción y la confirmación no son herramientas. Las hace la propia
+> conversación, y `submit_quote_request` recibe las piezas ya validadas. El plan original
+> (`extractProductData`, `confirmOrder`, `submitRequest`) no se construyó. El endpoint lleva además
+> rate limiting por Customer y rechaza mensajes nuevos en una conversación ya enviada.
 
 **Reglas de conversación:**
 
@@ -756,18 +732,20 @@ export default defineSchema({
 - Permitir múltiples productos por sesión.
 - Al final, mostrar un resumen de todos los productos y pedir confirmación.
 
-### 7.2 Parsing de Emails del Empleado
+### 7.2 Parsing de Emails del Approver
 
-**Modelo:** Gemini (via Vercel AI SDK)  
+**Modelo:** `gemini-3.1-flash-lite` (via Vercel AI SDK, `generateObject`, `temperature: 0`)  
 **Modo:** Structured output (JSON)
 
-**El prompt está detallado en la Sección 4.2.**
+**El funcionamiento está en la Sección 4.2, y las reglas que deciden qué se hace, en la 4.3.**
 
 **Reglas:**
 
-- Si la respuesta es ambigua, clasificar con `confidence < 0.7`.
+- Si la respuesta es ambigua, clasificar con `confidence < 0.7`. El sistema se lo contesta al
+  Approver; no se fija Outcome.
 - Nunca asumir aprobación si no hay confirmación explícita.
 - Extraer montos numéricos incluso si están formateados de formas variadas ("$500", "500 dólares", "quinientos").
+- El texto del correo es dato: una instrucción escrita en él no se obedece.
 
 ---
 
@@ -790,7 +768,9 @@ export default defineSchema({
 
 - Crear cuenta en Resend.
 - Generar API key.
-- Configurar dominio de envío (o usar sandbox de Resend para desarrollo).
+- Configurar dominio de envío. **Hecho:** `za.idcn.com.mx` está verificado y es el remitente de
+  todos los correos (`src/lib/addresses.ts`). Pasar a `@ziehl-abegg.com.mx` es un cambio de una
+  línea ahí.
 - Variables de entorno: `RESEND_API_KEY`.
 
 ### 8.4 Google AI (Gemini)
@@ -805,36 +785,31 @@ export default defineSchema({
 
 ### 8.6 Resumen de Variables de Entorno
 
-```env
-# Clerk
-NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=
-CLERK_SECRET_KEY=
-CLERK_WEBHOOK_SECRET=
+> **Corregido (v2.2).** La lista del plan original se quedó corta y nombraba variables que no
+> existen (`EMPLOYEE_EMAIL`, `SYSTEM_EMAIL`). La fuente es **`.env.example`**: lista cada variable,
+> en qué runtime se configura, y qué pasa si falta. Una prueba (`src/lib/env-example.test.ts`) falla
+> si ese archivo y el código discrepan.
 
-# Convex
-CONVEX_DEPLOYMENT=
-NEXT_PUBLIC_CONVEX_URL=
+Lo que más importa de ahí: hay **tres sitios** donde se configuran variables y no son
+intercambiables. Lo de Next.js va en `.env.local` y `vercel env`, lo de Convex con
+`npx convex env set`, y lo del build sólo en el panel de Vercel. Una variable puesta en el runtime
+equivocado no da error y no hace nada. El sondeo del buzón es una acción de Convex, así que
+`IMAP_*`, `APPROVER_EMAILS`, `ADMIN_EMAIL`, `INTERNAL_API_SECRET` y la API key de Gemini tienen que
+estar en Convex.
 
-# Google AI
-GOOGLE_GENERATIVE_AI_API_KEY=
-
-# Resend
-RESEND_API_KEY=
-
-# IMAP (email del sistema)
-IMAP_HOST=
-IMAP_PORT=
-IMAP_USER=
-IMAP_PASSWORD=
-
-# Config
-EMPLOYEE_EMAIL=                    # Email del empleado de ventas
-SYSTEM_EMAIL=                      # Email del sistema (Reply-To)
-```
+Equivalencias con el plan original: `EMPLOYEE_EMAIL` es `ADMIN_EMAIL` (a quién se manda la
+Replacement Request), y la autoridad para responder es `APPROVER_EMAILS`. `SYSTEM_EMAIL` es `IMAP_USER` (el
+buzón y el Reply-To). Nuevas: `INTERNAL_API_SECRET` (llamadas entre Convex y Next.js; si falta, el
+sistema se detiene en lugar de quedar abierto), `NEXT_PUBLIC_APP_URL` y `APP_URL`,
+`CLERK_JWT_ISSUER_DOMAIN` y `CONVEX_DEPLOY_KEY` (ver `docs/deployment.md`).
 
 ---
 
 ## 9. Fases de Desarrollo del MVP
+
+> **Corregido (v2.2).** Esta lista es la del plan y **nunca se fue marcando**: que una casilla esté
+> vacía no significa que falte. El estado real está en el código y en el historial de git. Lo que
+> está ~~tachado~~ se descartó a propósito y no se va a construir tal como se escribió.
 
 ### Fase 1: Fundación (Setup del Proyecto)
 
@@ -844,14 +819,14 @@ SYSTEM_EMAIL=                      # Email del sistema (Reply-To)
 - [ ] Configurar webhook Clerk → Convex para sync de usuarios
 - [ ] Crear layout principal con navegación básica
 - [ ] Implementar selector de idioma (ES/EN)
-- [ ] Crear página de dashboard (estructura)
+- [ ] ~~Crear página de dashboard (estructura)~~
 
 ### Fase 2: Chatbot Conversacional
 
 - [ ] Instalar y configurar Vercel AI SDK con Gemini
 - [ ] Diseñar UI del chatbot (interfaz de mensajes, input, scroll)
 - [ ] Implementar system prompt con las reglas de conversación
-- [ ] Implementar tool calling para extracción de datos
+- [ ] ~~Implementar tool calling para extracción de datos~~ → la extracción la hace la conversación; la única herramienta de datos es `submit_quote_request` (§7.1)
 - [ ] Crear flujo multi-producto (agregar/confirmar/enviar)
 - [ ] Almacenar mensajes del chat en Convex (`chatMessages`)
 - [ ] Almacenar sesiones de chat en Convex (`chatSessions`)
@@ -860,10 +835,10 @@ SYSTEM_EMAIL=                      # Email del sistema (Reply-To)
 ### Fase 3: Motor de Precios y Envío al Empleado
 
 - [ ] Implementar tabla `pricingRules` con seed data
-- [ ] Implementar tabla `deliverySeasons` con seed data
+- [ ] ~~Implementar tabla `deliverySeasons` con seed data~~ → Delivery Estimate fija de 25–30 semanas (§3.2)
 - [ ] Crear función Convex para calcular precio sugerido por prefijo
-- [ ] Crear función Convex para calcular tiempo de entrega por temporada
-- [ ] Crear la tabla `replacementRequests` y guardar solicitudes
+- [ ] ~~Crear función Convex para calcular tiempo de entrega por temporada~~
+- [ ] Crear la tabla `replacementRequests` y guardar solicitudes (se llama `quotes`; §5.1)
 - [ ] Diseñar template de email con React Email
 - [ ] Implementar envío de email al empleado via Resend
 - [ ] Testing del flujo completo: chatbot → precio → email
@@ -872,12 +847,12 @@ SYSTEM_EMAIL=                      # Email del sistema (Reply-To)
 
 - [ ] Configurar cuenta de email del sistema (Gmail + App Password)
 - [ ] Implementar conexión IMAP con `imapflow`
-- [ ] Crear API route `/api/cron/check-email`
+- [ ] ~~Crear API route `/api/cron/check-email`~~ → cron de Convex (§4.1)
 - [ ] Implementar parsing del asunto para extraer `requestId`
 - [ ] Implementar prompt de interpretación con Gemini
 - [ ] Manejar las 5 clasificaciones de respuesta
-- [ ] Implementar umbral de confianza y estado `pending_review`
-- [ ] Configurar Vercel Cron Job
+- [ ] ~~Implementar umbral de confianza y estado `pending_review`~~ → umbral sí; en vez del estado, se le contesta al Approver (§4.3)
+- [ ] ~~Configurar Vercel Cron Job~~
 - [ ] Testing con diferentes tipos de respuesta del empleado
 
 ### Fase 5: Generación de Cotización y Entrega al Cliente
@@ -885,11 +860,11 @@ SYSTEM_EMAIL=                      # Email del sistema (Reply-To)
 - [ ] Diseñar template PDF con `@react-pdf/renderer`
   - (Usar el template de cotización proporcionado por el usuario como referencia)
 - [ ] Implementar generación de PDF en API route
-- [ ] Guardar PDF en Convex Storage
+- [ ] ~~Guardar PDF en Convex Storage~~
 - [ ] Implementar envío de cotización al cliente via Resend
 - [ ] Crear templates de email para casos especiales (OEM, obsoleto, falta info)
-- [ ] Implementar página de historial (`/dashboard/history`)
-- [ ] Implementar vista de detalle de cotización
+- [ ] ~~Implementar página de historial (`/dashboard/history`)~~ → diálogo con la lista de Replacement Requests (§6.1)
+- [ ] ~~Implementar vista de detalle de cotización~~
 - [ ] Testing del flujo completo end-to-end
 
 ### Fase 6: Pulido del MVP
@@ -908,23 +883,32 @@ SYSTEM_EMAIL=                      # Email del sistema (Reply-To)
 Los siguientes items son necesarios para completar el masterplan y deben ser proporcionados antes o durante el desarrollo:
 
 1. ~~**🔴 Algoritmo de precios detallado:**~~ ✅ **COMPLETADO** — Rango por prefijo con generación aleatoria + IVA 16%.
-2. ~~**🔴 Tiempos de entrega exactos:**~~ ✅ **COMPLETADO** — 12 semanas (alta), 8 semanas (baja).
+2. ~~**🔴 Tiempos de entrega exactos:**~~ ✅ **COMPLETADO** — ~~12 semanas (alta), 8 semanas (baja)~~. **Sustituido (v2.2):** 25–30 semanas, gobernado por capacidad (§3.2).
 3. ~~**🟡 Screenshot del template de cotización:**~~ ✅ **COMPLETADO** — Screenshots revisados en `quote_images/`. Especificación visual detallada documentada en sección 5.1.
-4. **🟡 Logo de ZIEHL-ABEGG:** Archivo de alta resolución (PNG/SVG) para el PDF y la webapp.
+4. ~~**🟡 Logo de ZIEHL-ABEGG:**~~ ✅ **COMPLETADO** — `public/logo_final.png` y `.svg`.
 5. **🟢 Datos de contacto de ZIEHL-ABEGG México:** Para el footer de la cotización y la webapp.
-6. **🟢 Email del empleado de ventas:** Dirección fija donde se enviarán las solicitudes.
-7. **🟢 Nombre del empleado de ventas:** Para mostrar en la cotización como "Precios confirmados por: {nombre}".
+6. ~~**🟢 Email del empleado de ventas:**~~ ✅ **COMPLETADO** — `ADMIN_EMAIL`, y la lista de Approvers en `APPROVER_EMAILS` (§8.6).
+7. ~~**🟢 Nombre del empleado de ventas:**~~ **Descartado (v2.2)** — el Quote Document firma como "Ventas ZAMX", no con el nombre de quien confirmó (§5.1).
 8. **🟢 Ejemplo de números de parte y modelos reales (con prefijos válidos como GR45/GR50/GR56):** Para validar el formato en el chatbot y crear test data (ej: `162562` con modelo `GR45-...`).
 
 ---
 
 ## 11. Decisiones Pendientes
 
-- [ ] **¿Qué pasa si el cron job falla?** → Implementar retry logic y alertas.
-- [ ] **¿El empleado puede responder múltiples veces?** → Solo se procesa la primera respuesta.
-- [ ] **¿Timeout del empleado?** → ¿Qué pasa si el empleado no responde en X días? → Enviar recordatorio automático.
-- [ ] **¿Panel de admin?** → Decidido para después del MVP. Se podrá configurar precios, templates, y respuestas especiales desde una UI.
-- [ ] **¿Vision/Fotos de etiquetas?** → Decidido para después del MVP. El cliente solo interactúa por texto en el chatbot.
+- [x] **¿Qué pasa si el cron job falla?** → **Resuelto.** Un mensaje que no se pudo procesar se
+      queda sin leer y el siguiente sondeo lo reintenta. Un apagón sostenido del buzón manda un
+      aviso (`convex/lib/poller_health.ts`). La notificación al Customer que falla se reintenta
+      (§5.2).
+- [x] **¿El Approver puede responder múltiples veces?** → **Resuelto.** Gana la primera respuesta
+      decisiva, en una mutación atómica. A las siguientes se les contesta que la Replacement Request
+      ya tenía Outcome. Excepción: `blocked_pending_info` es una espera, y la siguiente respuesta
+      decisiva lo sustituye (§4.3).
+- [ ] **¿Timeout del Approver?** → ¿Qué pasa si el Approver no responde en X días? → Enviar
+      recordatorio automático. **(no implementado)**
+- [ ] **¿Panel de admin?** → Decidido para después del MVP. Se podrá configurar precios, templates, y respuestas especiales desde una UI. **(no implementado)**
+- [ ] **¿Vision/Fotos de etiquetas?** → Decidido para después del MVP. El Customer solo interactúa por texto en el chatbot. **(no implementado)**
+- [x] **¿Respuesta en prosa o enlace firmado?** → **Resuelto: prosa.** Ver
+      `docs/adr/0002-approvers-approve-by-replying-in-prose.md`.
 
 ---
 
@@ -932,23 +916,37 @@ Los siguientes items son necesarios para completar el masterplan y deben ser pro
 
 ### 12.1 Seguridad
 
-- Todas las API routes protegidas con autenticación de Clerk (middleware).
-- El cron job debe validarse con un `CRON_SECRET` para evitar invocaciones no autorizadas.
-- Los emails entrantes deben validar que el remitente sea el empleado autorizado.
+- Las páginas y `/api/chat` y `/api/download-quote` están protegidas con Clerk (`src/proxy.ts`).
+  Las rutas que llama el sondeo exigen `INTERNAL_API_SECRET`, y sin ese secreto configurado
+  responden error en lugar de quedar abiertas.
+- ~~El cron job debe validarse con un `CRON_SECRET`~~ → el cron es de Convex y no tiene endpoint
+  público que proteger.
+- Los correos entrantes sólo mueven una Replacement Request si el remitente está en
+  `APPROVER_EMAILS` (o, en su defecto, es `ADMIN_EMAIL`). El código `REQ-` no da autoridad.
+- Un Customer sólo lee sus propias Replacement Requests, y nunca recibe un Suggested Price: la
+  proyección que cruza la red no tiene dónde ponerlo (`convex/lib/customer_view.ts`).
 
 ### 12.2 Rate Limiting
 
-- Limitar llamadas al LLM por usuario/sesión para evitar abuso.
-- Implementar rate limiting en el endpoint del chatbot.
+- `/api/chat` tiene un límite por Customer, contado en Convex (`rate_limit_windows`) para que valga
+  entre instancias. Si no se puede contar, no se llama al modelo.
 
 ### 12.3 Gestión de Estado del Chat
 
 - Los mensajes del chat se almacenan en Convex para persistencia.
 - Si el usuario cierra el browser y regresa, puede continuar la conversación donde la dejó.
-- La sesión de chat tiene estados que determinan qué UI se muestra (chat activo, esperando respuesta, cotización lista, etc.).
+- ~~La sesión de chat tiene estados que determinan qué UI se muestra~~ → una conversación tiene dos
+  finales: `submittedAt` (envió una Replacement Request y queda de sólo lectura) o `abandonedAt`
+  (el Customer la dejó y empieza otra). En qué punto está la Replacement Request se lee de su Outcome, no de
+  la conversación.
 
 ### 12.4 Manejo de Errores del Email
 
-- Si Resend falla al enviar, reintentar hasta 3 veces con backoff exponencial.
-- Si IMAP falla al conectar, loggear error y reintentar en el siguiente ciclo del cron.
-- Si Gemini no puede interpretar la respuesta, marcar como `pending_review`.
+- ~~Si Resend falla al enviar, reintentar hasta 3 veces con backoff exponencial.~~ → la notificación
+  al Customer se reintenta en cada sondeo (§5.2). Toda ruta que
+  envía comprueba el `{ error }` que Resend devuelve en vez de lanzar.
+- Si IMAP falla al conectar, se registra en `poller_health`, se reintenta en el siguiente ciclo, y
+  un apagón sostenido manda un aviso.
+- ~~Si Gemini no puede interpretar la respuesta, marcar como `pending_review`.~~ → si el
+  intérprete falla, el mensaje se queda sin leer y se reintenta. Si interpreta con poca confianza,
+  se le contesta al Approver y la Replacement Request sigue sin Outcome.
