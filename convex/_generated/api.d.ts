@@ -24,6 +24,7 @@ import type * as lib_pricing from "../lib/pricing.js";
 import type * as lib_quote_document from "../lib/quote_document.js";
 import type * as lib_rate_limit from "../lib/rate_limit.js";
 import type * as lib_reply_verdict from "../lib/reply_verdict.js";
+import type * as lib_request_filters from "../lib/request_filters.js";
 import type * as lib_request_id from "../lib/request_id.js";
 import type * as lib_supervisor_authority from "../lib/supervisor_authority.js";
 import type * as lib_supervisor_view from "../lib/supervisor_view.js";
@@ -58,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   "lib/quote_document": typeof lib_quote_document;
   "lib/rate_limit": typeof lib_rate_limit;
   "lib/reply_verdict": typeof lib_reply_verdict;
+  "lib/request_filters": typeof lib_request_filters;
   "lib/request_id": typeof lib_request_id;
   "lib/supervisor_authority": typeof lib_supervisor_authority;
   "lib/supervisor_view": typeof lib_supervisor_view;

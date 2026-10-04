@@ -14,6 +14,22 @@ const OUTCOME_SET: Record<Outcome, true> = {
 export const OUTCOMES = Object.keys(OUTCOME_SET) as Outcome[];
 
 /**
+ * «En revisión» como valor de filtro. En los datos no existe: es la ausencia de
+ * Outcome. `blocked_pending_info` es un Outcome y tiene su propio valor.
+ */
+export const AWAITING_REVIEW = 'awaiting_review';
+
+/** Por lo que se puede filtrar una lista: cada Outcome, o que no tenga ninguno. */
+export type OutcomeFilter = Outcome | typeof AWAITING_REVIEW;
+
+/** Todos los valores de filtro, «en revisión» primero, como los ofrece el panel. */
+export const OUTCOME_FILTERS: readonly OutcomeFilter[] = [AWAITING_REVIEW, ...OUTCOMES];
+
+export function isOutcomeFilter(value: string): value is OutcomeFilter {
+  return OUTCOME_FILTERS.some((filter) => filter === value);
+}
+
+/**
  * Los Outcomes que producen un Quote Document, frente a los que se le comunican
  * al Customer sin uno. La distinción se consulta desde la mutación y desde el
  * poller, así que vive en un solo sitio.

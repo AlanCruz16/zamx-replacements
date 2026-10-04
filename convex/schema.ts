@@ -85,6 +85,14 @@ export default defineSchema({
   })
     .index('by_user_id', ['userId'])
     .index('by_request_id', ['requestId'])
+    /**
+     * Los filtros de la lista del Supervisor (`lib/request_filters.ts`). Un
+     * Outcome ausente se indexa como tal, así que «en revisión» también sale
+     * por índice. Convex añade `_creationTime` al final de cada índice, y eso es
+     * lo que acota el periodo y ordena de la más reciente a la más antigua.
+     */
+    .index('by_outcome', ['outcome'])
+    .index('by_user_id_and_outcome', ['userId', 'outcome'])
     .index('by_notification', ['customerNotifiedAt', 'outcome']),
 
   /**

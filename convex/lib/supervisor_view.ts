@@ -24,6 +24,8 @@ export interface SupervisorRequestRow {
   _id: Id<'quotes'>;
   requestId: string;
   receivedAt: number;
+  /** Para filtrar la lista por este Customer. */
+  customerId: Id<'users'>;
   customerName: string;
   companyName: string;
   partCount: number;
@@ -76,6 +78,7 @@ export async function supervisorRow(
     _id: quote._id,
     requestId: quote.requestId,
     receivedAt: quote._creationTime,
+    customerId: quote.userId,
     customerName: user.fullName,
     companyName: user.companyName,
     partCount: quote.products.length,

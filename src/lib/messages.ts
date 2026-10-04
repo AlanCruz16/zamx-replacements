@@ -541,7 +541,22 @@ export const SUPERVISOR_MESSAGES = {
     },
     loading: 'Cargando solicitudes…',
     empty: 'No hay solicitudes en este periodo.',
+    emptyFiltered: 'Ninguna solicitud coincide con estos filtros.',
     loadMore: 'Cargar más',
+    /** Los filtros, que viven en la URL: `supervisor-list-url.ts`. */
+    filters: {
+      outcome: 'Resultado',
+      anyOutcome: 'Todos',
+      search: 'Código',
+      searchPlaceholder: 'REQ-…',
+      searchButton: 'Buscar',
+      customer: 'Cliente',
+      /** Mientras no hay ninguna fila de la que sacar el nombre. */
+      someCustomer: 'el seleccionado',
+      removeCustomer: 'Quitar el filtro de cliente',
+      onlyCustomer: (name: string) => `Ver sólo las solicitudes de ${name}`,
+      clear: 'Quitar filtros',
+    },
   },
 
   /** El detalle de una Replacement Request: `RequestDetail.tsx`. */

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 import { api } from './_generated/api';
 import type { Doc, Id } from './_generated/dataModel';
 import { hasQuoteDocument } from './lib/quote_document';
+import type { RequestFilters } from './lib/request_filters';
 import type { SupervisorRequestRow } from './lib/supervisor_view';
 import { requireSupervisor } from './lib/supervisors';
 import schema from './schema';
@@ -221,7 +222,8 @@ async function seedRequest(
 async function listAll(
   asSupervisor: ReturnType<TestConvex['withIdentity']>,
   period: { start?: number; end?: number },
-  numItems = 2
+  numItems = 2,
+  filters: RequestFilters = {}
 ) {
   const rows = [];
   let cursor: string | null = null;
@@ -230,6 +232,7 @@ async function listAll(
       api.supervisor.listRequests,
       {
         period,
+        filters,
         paginationOpts: { numItems, cursor },
       }
     );
@@ -256,6 +259,7 @@ describe('la lista de Replacement Requests', () => {
         _id: recent._id,
         requestId: recent.requestId,
         receivedAt: recent._creationTime,
+        customerId: ana,
         customerName: 'Ana',
         companyName: 'Empresa de Ana',
         partCount: 2,
@@ -265,6 +269,7 @@ describe('la lista de Replacement Requests', () => {
         _id: old._id,
         requestId: old.requestId,
         receivedAt: old._creationTime,
+        customerId: ana,
         customerName: 'Ana',
         companyName: 'Empresa de Ana',
         partCount: 1,
@@ -306,6 +311,174 @@ describe('la lista de Replacement Requests', () => {
     const rows = await listAll(asSupervisor, {}, 3);
 
     expect(rows.map((row) => row._id)).toEqual(seeded.map((quote) => quote._id).reverse());
+  });
+});
+
+/**
+ * Los filtros de la lista. Se siembra una mezcla de Customers y Outcomes en
+ * fechas distintas, y cada prueba pregunta por un corte y compara contra lo que
+ * debería salir, en orden.
+ */
+describe('los filtros de la lista', () => {
+  async function seedMix(t: TestConvex) {
+    const ana = await seedCustomer(t, 'Ana');
+    const bruno = await seedCustomer(t, 'Bruno');
+    const quotes = {
+      anaOldDiscontinued: await seedRequest(t, ana, NOW - 40 * DAY, { outcome: 'discontinued' }),
+      brunoAwaiting: await seedRequest(t, bruno, NOW - 20 * DAY),
+      anaBlocked: await seedRequest(t, ana, NOW - 15 * DAY, { outcome: 'blocked_pending_info' }),
+      brunoDiscontinued: await seedRequest(t, bruno, NOW - 10 * DAY, { outcome: 'discontinued' }),
+      anaAwaiting: await seedRequest(t, ana, NOW - 5 * DAY),
+      anaDiscontinued: await seedRequest(t, ana, NOW - 2 * DAY, { outcome: 'discontinued' }),
+    };
+    return { ana, bruno, quotes };
+  }
+
+  const ids = (rows: { _id: Id<'quotes'> }[]) => rows.map((row) => row._id);
+
+  test('por Outcome trae sólo las de ese Outcome', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const { quotes } = await seedMix(t);
+
+    const rows = await listAll(asSupervisor, {}, 2, { outcome: 'discontinued' });
+
+    expect(ids(rows)).toEqual([
+      quotes.anaDiscontinued._id,
+      quotes.brunoDiscontinued._id,
+      quotes.anaOldDiscontinued._id,
+    ]);
+  });
+
+  test('«en revisión» trae sólo las que no tienen Outcome', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const { quotes } = await seedMix(t);
+
+    const rows = await listAll(asSupervisor, {}, 2, { outcome: 'awaiting_review' });
+
+    expect(ids(rows)).toEqual([quotes.anaAwaiting._id, quotes.brunoAwaiting._id]);
+  });
+
+  test('blocked_pending_info es su propio filtro, no «en revisión»', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const { quotes } = await seedMix(t);
+
+    const rows = await listAll(asSupervisor, {}, 2, { outcome: 'blocked_pending_info' });
+
+    expect(ids(rows)).toEqual([quotes.anaBlocked._id]);
+  });
+
+  test('por Customer trae sólo las suyas', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const { bruno, quotes } = await seedMix(t);
+
+    const rows = await listAll(asSupervisor, {}, 2, { customerId: bruno });
+
+    expect(ids(rows)).toEqual([quotes.brunoDiscontinued._id, quotes.brunoAwaiting._id]);
+  });
+
+  test('un Customer que no existe, o un id mal formado, no trae nada', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    await seedMix(t);
+
+    // El id llega de la URL: tiene que soportar cualquier cosa sin tumbar la página.
+    expect(await listAll(asSupervisor, {}, 2, { customerId: 'no-es-un-id' })).toEqual([]);
+  });
+
+  test('Outcome y periodo se combinan: descontinuadas de los últimos 30 días', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const { quotes } = await seedMix(t);
+
+    const rows = await listAll(asSupervisor, { start: NOW - 30 * DAY }, 2, {
+      outcome: 'discontinued',
+    });
+
+    expect(ids(rows)).toEqual([quotes.anaDiscontinued._id, quotes.brunoDiscontinued._id]);
+  });
+
+  test('Customer y Outcome se combinan, también con el periodo', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const { ana, quotes } = await seedMix(t);
+
+    expect(
+      ids(await listAll(asSupervisor, {}, 2, { customerId: ana, outcome: 'discontinued' }))
+    ).toEqual([quotes.anaDiscontinued._id, quotes.anaOldDiscontinued._id]);
+    expect(
+      ids(
+        await listAll(asSupervisor, { start: NOW - 30 * DAY, end: NOW - 3 * DAY }, 2, {
+          customerId: ana,
+          outcome: 'awaiting_review',
+        })
+      )
+    ).toEqual([quotes.anaAwaiting._id]);
+  });
+
+  test('por código REQ- encuentra exactamente esa, sin importar mayúsculas ni espacios', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const { quotes } = await seedMix(t);
+    const code = quotes.brunoAwaiting.requestId;
+
+    const rows = await listAll(asSupervisor, {}, 2, {
+      requestId: `  ${code.toLowerCase()} `,
+    });
+
+    expect(ids(rows)).toEqual([quotes.brunoAwaiting._id]);
+  });
+
+  test('por código REQ- no encuentra nada si no existe o si otro filtro la deja fuera', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const { ana, quotes } = await seedMix(t);
+    const code = quotes.brunoAwaiting.requestId;
+
+    expect(await listAll(asSupervisor, {}, 2, { requestId: 'REQ-NOEXIS' })).toEqual([]);
+    expect(await listAll(asSupervisor, {}, 2, { requestId: code, customerId: ana })).toEqual([]);
+    expect(
+      await listAll(asSupervisor, {}, 2, { requestId: code, outcome: 'discontinued' })
+    ).toEqual([]);
+    expect(await listAll(asSupervisor, { start: NOW - 7 * DAY }, 2, { requestId: code })).toEqual(
+      []
+    );
+  });
+
+  test('paginando bajo cualquier combinación, cada coincidencia sale exactamente una vez', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    const bruno = await seedCustomer(t, 'Bruno');
+    const outcomes = [undefined, 'discontinued', 'priced_as_suggested'] as const;
+    const seeded = [];
+    for (let day = 30; day >= 1; day--) {
+      const outcome = outcomes[day % 3];
+      seeded.push(
+        await seedRequest(t, day % 2 ? ana : bruno, NOW - day * DAY, outcome ? { outcome } : {})
+      );
+    }
+
+    const combos: { period: { start?: number }; filters: RequestFilters }[] = [
+      { period: {}, filters: { outcome: 'discontinued' } },
+      { period: {}, filters: { outcome: 'awaiting_review' } },
+      { period: {}, filters: { customerId: ana } },
+      {
+        period: { start: NOW - 20 * DAY },
+        filters: { customerId: bruno, outcome: 'discontinued' },
+      },
+      { period: { start: NOW - 12 * DAY }, filters: { outcome: 'awaiting_review' } },
+    ];
+    for (const { period, filters } of combos) {
+      const expected = seeded
+        .filter((quote) => period.start === undefined || quote._creationTime >= period.start)
+        .filter((quote) => !filters.customerId || quote.userId === filters.customerId)
+        .filter(
+          (quote) =>
+            !filters.outcome ||
+            (filters.outcome === 'awaiting_review'
+              ? quote.outcome === undefined
+              : quote.outcome === filters.outcome)
+        )
+        .map((quote) => quote._id)
+        .reverse();
+
+      expect(expected.length).toBeGreaterThan(1);
+      expect(ids(await listAll(asSupervisor, period, 2, filters))).toEqual(expected);
+    }
   });
 });
 

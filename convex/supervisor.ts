@@ -1,6 +1,7 @@
 import { paginationOptsValidator } from 'convex/server';
 import { v } from 'convex/values';
 import { query } from './_generated/server';
+import { filteredRequests, periodValidator, requestFiltersValidator } from './lib/request_filters';
 import { callerIsSupervisor, requireSupervisor } from './lib/supervisors';
 import { supervisorDetail, supervisorRow } from './lib/supervisor_view';
 
@@ -19,34 +20,24 @@ export const amISupervisor = query({
 });
 
 /**
- * El periodo por fecha de recepción: `start` incluido, `end` excluido. Sin
- * ninguno de los dos es «todo».
- */
-const periodValidator = v.object({
-  start: v.optional(v.number()),
-  end: v.optional(v.number()),
-});
-
-/**
  * Las Replacement Requests recibidas en el periodo, de la más reciente a la más
- * antigua, por páginas. Recorre el índice de creación acotado al periodo, así
- * que no lee nada de fuera.
+ * antigua, por páginas, y con los filtros de la lista combinados. Cada
+ * combinación sale por un índice acotado al periodo (`lib/request_filters.ts`),
+ * así que no lee nada de fuera.
  */
 export const listRequests = query({
-  args: { period: periodValidator, paginationOpts: paginationOptsValidator },
-  handler: async (ctx, { period, paginationOpts }) => {
-    if ((await requireSupervisor(ctx)) === 'signed_out') {
-      return { page: [], isDone: true, continueCursor: '' };
-    }
+  args: {
+    period: periodValidator,
+    filters: v.optional(requestFiltersValidator),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, { period, filters = {}, paginationOpts }) => {
+    const nothing = { page: [], isDone: true, continueCursor: '' };
+    if ((await requireSupervisor(ctx)) === 'signed_out') return nothing;
 
-    const result = await ctx.db
-      .query('quotes')
-      .withIndex('by_creation_time', (q) => {
-        const from = period.start === undefined ? q : q.gte('_creationTime', period.start);
-        return period.end === undefined ? from : from.lt('_creationTime', period.end);
-      })
-      .order('desc')
-      .paginate(paginationOpts);
+    const requests = filteredRequests(ctx, period, filters);
+    if (!requests) return nothing;
+    const result = await requests.paginate(paginationOpts);
 
     return {
       ...result,
