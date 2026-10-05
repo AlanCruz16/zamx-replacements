@@ -5,6 +5,7 @@ import { useConvexAuth, useQuery } from 'convex/react';
 import { ArrowLeft, Download } from 'lucide-react';
 import { api } from '../../../convex/_generated/api';
 import type { SupervisorProduct } from '../../../convex/lib/supervisor_view';
+import { Card, Facts } from './Card';
 import { OutcomeTag } from './OutcomeTag';
 import { StackedCell } from './StackedCell';
 import { formatCurrency, formatDateTime, SUPERVISOR_MESSAGES } from '@/lib/messages';
@@ -51,7 +52,16 @@ export function RequestDetail({ requestId }: { requestId: string }) {
             <Card title={t.request.customerHeading}>
               <Facts
                 facts={[
-                  [t.request.name, request.customer.fullName],
+                  [
+                    t.request.name,
+                    <Link
+                      key="name"
+                      href={`/supervisor/customers/${request.customer._id}`}
+                      className="text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)] hover:underline"
+                    >
+                      {request.customer.fullName}
+                    </Link>,
+                  ],
                   [t.request.company, request.customer.companyName],
                   [t.request.email, request.customer.email],
                   [t.request.phone, request.customer.phone ?? t.request.noPhone],
@@ -128,28 +138,6 @@ function QuoteDocumentLink({ requestId }: { requestId: string }) {
       <Download className="w-4 h-4" aria-hidden />
       {t.request.downloadQuoteDocument}
     </a>
-  );
-}
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-4">
-      <h2 className="mb-3 text-sm font-semibold text-gray-500">{title}</h2>
-      {children}
-    </div>
-  );
-}
-
-function Facts({ facts }: { facts: [string, React.ReactNode][] }) {
-  return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-      {facts.map(([label, value]) => (
-        <div key={label} className="contents">
-          <dt className="text-gray-500">{label}</dt>
-          <dd className="break-words min-w-0">{value}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
 

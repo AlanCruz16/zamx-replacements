@@ -1,5 +1,6 @@
 import type { NotifiableOutcome, Outcome } from '../../convex/lib/outcome';
 import type { PeriodPreset } from './supervisor-period';
+import type { CustomerSort } from '../../convex/lib/customer_list';
 
 /**
  * Todo lo que el Customer lee, en los dos idiomas que puede elegir.
@@ -601,6 +602,50 @@ export const SUPERVISOR_MESSAGES = {
     noConfirmedPrice: 'Sin precio aún',
     noConfirmedDelivery: 'Sin confirmar',
     weeks: (min: number, max: number) => (min === max ? `${min} semanas` : `${min}–${max} semanas`),
+  },
+
+  /** La lista de Customers: `CustomerList.tsx`. */
+  customers: {
+    columns: {
+      name: 'Nombre',
+      company: 'Empresa',
+      email: 'Correo',
+      requests: 'Solicitudes',
+      latestRequestAt: 'Última solicitud',
+    },
+    loading: 'Cargando clientes…',
+    empty: 'Todavía ningún cliente ha enviado una solicitud.',
+    emptyFiltered: 'Ningún cliente coincide con esta empresa.',
+    company: 'Empresa',
+    companyPlaceholder: 'Parte del nombre…',
+    searchButton: 'Buscar',
+    clear: 'Quitar filtro',
+    sort: 'Ordenar por',
+    sorts: {
+      latest: 'Solicitud más reciente',
+      company: 'Empresa',
+      requests: 'Número de solicitudes',
+    } satisfies Record<CustomerSort, string>,
+  },
+
+  /** El detalle de un Customer: `CustomerDetail.tsx`. */
+  customer: {
+    back: 'Volver a los clientes',
+    loading: 'Cargando cliente…',
+    notFound: 'No existe este cliente.',
+    contactHeading: 'Datos de contacto',
+    company: 'Empresa',
+    email: 'Correo',
+    phone: 'Teléfono',
+    noPhone: 'Sin teléfono',
+    language: 'Idioma preferido',
+    languages: { es: 'Español', en: 'Inglés' } satisfies Record<Language, string>,
+    signedUpAt: 'Se dio de alta',
+    requestsHeading: (count: number) =>
+      count === 1 ? '1 solicitud de reemplazo' : `${count} solicitudes de reemplazo`,
+    noRequests: 'Este cliente no ha enviado ninguna solicitud.',
+    /** A la lista filtrada por este Customer, donde se combinan los demás filtros. */
+    openInList: 'Filtrar en la lista de solicitudes',
   },
 };
 

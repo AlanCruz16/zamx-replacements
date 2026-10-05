@@ -183,7 +183,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function seedCustomer(t: TestConvex, fullName: string) {
+async function seedCustomer(
+  t: TestConvex,
+  fullName: string,
+  fields: Partial<Omit<Doc<'users'>, '_id' | '_creationTime'>> = {}
+) {
   vi.setSystemTime(NOW - 1000 * DAY);
   return t.run((ctx) =>
     ctx.db.insert('users', {
@@ -193,6 +197,7 @@ async function seedCustomer(t: TestConvex, fullName: string) {
       email: `${fullName.toLowerCase()}@example.com`,
       phone: '+52 81 1234 5678',
       preferredLanguage: 'es',
+      ...fields,
     })
   );
 }
@@ -502,6 +507,7 @@ describe('el detalle de una Replacement Request', () => {
       requestId: quote.requestId,
       receivedAt: quote._creationTime,
       customer: {
+        _id: ana,
         fullName: 'Ana',
         companyName: 'Empresa de Ana',
         email: 'ana@example.com',
@@ -570,6 +576,171 @@ describe('el detalle de una Replacement Request', () => {
   });
 });
 
+/**
+ * Los Customers: una fila por persona con al menos una Replacement Request,
+ * nunca agrupadas por empresa, y el detalle de cada una.
+ */
+describe('la lista de Customers', () => {
+  test('sólo trae a quien ha enviado alguna Replacement Request', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    // Se dio de alta y nunca pidió nada; un Supervisor es igual que ella.
+    await seedCustomer(t, 'Bruno');
+    await seedCustomer(t, 'Sofia', { email: 'sofia@zamx.mx', companyName: 'Pendiente' });
+    await seedRequest(t, ana, NOW - DAY);
+
+    const rows = await asSupervisor.query(api.supervisor.listCustomers, {});
+
+    expect(rows.map((row) => row._id)).toEqual([ana]);
+  });
+
+  test('cuenta sus Replacement Requests y da la fecha de la última', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    const bruno = await seedCustomer(t, 'Bruno');
+    await seedRequest(t, ana, NOW - 30 * DAY);
+    const brunoOnly = await seedRequest(t, bruno, NOW - 20 * DAY);
+    const anaLatest = await seedRequest(t, ana, NOW - 2 * DAY);
+
+    const rows = await asSupervisor.query(api.supervisor.listCustomers, {});
+
+    // Por defecto, quien pidió algo más recientemente va primero.
+    expect(rows).toEqual([
+      {
+        _id: ana,
+        fullName: 'Ana',
+        companyName: 'Empresa de Ana',
+        email: 'ana@example.com',
+        requestCount: 2,
+        latestRequestAt: anaLatest._creationTime,
+      },
+      {
+        _id: bruno,
+        fullName: 'Bruno',
+        companyName: 'Empresa de Bruno',
+        email: 'bruno@example.com',
+        requestCount: 1,
+        latestRequestAt: brunoOnly._creationTime,
+      },
+    ]);
+  });
+
+  test('dos Customers con la misma empresa son dos filas', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana', { companyName: 'Pendiente' });
+    const bruno = await seedCustomer(t, 'Bruno', { companyName: 'Pendiente' });
+    await seedRequest(t, ana, NOW - 2 * DAY);
+    await seedRequest(t, bruno, NOW - DAY);
+
+    const rows = await asSupervisor.query(api.supervisor.listCustomers, {});
+
+    expect(rows.map((row) => [row._id, row.companyName, row.requestCount])).toEqual([
+      [bruno, 'Pendiente', 1],
+      [ana, 'Pendiente', 1],
+    ]);
+  });
+
+  test('filtra por empresa sin mirar mayúsculas, acentos ni espacios, y por un trozo del nombre', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana', { companyName: 'Ventiladores Monterrey' });
+    const bruno = await seedCustomer(t, 'Bruno', { companyName: 'Climatización del Norte' });
+    const carla = await seedCustomer(t, 'Carla', { companyName: 'CLIMATIZACION NORTE SA' });
+    for (const customer of [ana, bruno, carla]) await seedRequest(t, customer, NOW - DAY);
+
+    const rows = await asSupervisor.query(api.supervisor.listCustomers, {
+      company: '  climatización ',
+    });
+
+    expect(rows.map((row) => row._id).sort()).toEqual([bruno, carla].sort());
+  });
+
+  test('ordena por empresa, y dentro de una empresa por la última solicitud', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana', { companyName: 'Zeta' });
+    const bruno = await seedCustomer(t, 'Bruno', { companyName: 'álamo' });
+    const carla = await seedCustomer(t, 'Carla', { companyName: 'Beta' });
+    const dario = await seedCustomer(t, 'Dario', { companyName: 'Beta' });
+    await seedRequest(t, carla, NOW - 4 * DAY);
+    await seedRequest(t, ana, NOW - 3 * DAY);
+    await seedRequest(t, dario, NOW - 2 * DAY);
+    await seedRequest(t, bruno, NOW - DAY);
+
+    const rows = await asSupervisor.query(api.supervisor.listCustomers, { sort: 'company' });
+
+    expect(rows.map((row) => row._id)).toEqual([bruno, dario, carla, ana]);
+  });
+
+  test('ordena por número de solicitudes, de más a menos', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    const bruno = await seedCustomer(t, 'Bruno');
+    await seedRequest(t, bruno, NOW - 3 * DAY);
+    await seedRequest(t, bruno, NOW - 2 * DAY);
+    await seedRequest(t, ana, NOW - DAY);
+
+    const rows = await asSupervisor.query(api.supervisor.listCustomers, { sort: 'requests' });
+
+    expect(rows.map((row) => row._id)).toEqual([bruno, ana]);
+  });
+});
+
+describe('el detalle de un Customer', () => {
+  test('trae sus datos de contacto y sólo sus Replacement Requests, la más reciente primero', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana', { preferredLanguage: 'en' });
+    const bruno = await seedCustomer(t, 'Bruno');
+    const signedUpAt = (await t.run((ctx) => ctx.db.get(ana)))!._creationTime;
+    const old = await seedRequest(t, ana, NOW - 10 * DAY, { outcome: 'discontinued' });
+    await seedRequest(t, bruno, NOW - 5 * DAY);
+    const recent = await seedRequest(t, ana, NOW - DAY);
+
+    const detail = await asSupervisor.query(api.supervisor.customerDetail, { customerId: ana });
+
+    expect(detail).toEqual({
+      _id: ana,
+      fullName: 'Ana',
+      companyName: 'Empresa de Ana',
+      email: 'ana@example.com',
+      phone: '+52 81 1234 5678',
+      preferredLanguage: 'en',
+      signedUpAt,
+      requests: [
+        {
+          _id: recent._id,
+          requestId: recent.requestId,
+          receivedAt: recent._creationTime,
+          customerId: ana,
+          customerName: 'Ana',
+          companyName: 'Empresa de Ana',
+          partCount: 1,
+          outcome: undefined,
+        },
+        {
+          _id: old._id,
+          requestId: old.requestId,
+          receivedAt: old._creationTime,
+          customerId: ana,
+          customerName: 'Ana',
+          companyName: 'Empresa de Ana',
+          partCount: 1,
+          outcome: 'discontinued',
+        },
+      ],
+    });
+  });
+
+  test('un Customer que no existe, o un id mal formado, no trae nada', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    await t.run((ctx) => ctx.db.delete(ana));
+
+    expect(await asSupervisor.query(api.supervisor.customerDetail, { customerId: ana })).toBeNull();
+    expect(
+      await asSupervisor.query(api.supervisor.customerDetail, { customerId: 'no-es-un-id' })
+    ).toBeNull();
+  });
+});
+
 describe('quien no es Supervisor', () => {
   test('no puede leer ni la lista ni el detalle', async () => {
     const { t } = supervisorConvex();
@@ -591,6 +762,22 @@ describe('quien no es Supervisor', () => {
     await expect(
       asAna.query(api.supervisor.requestDetail, { requestId: quote.requestId })
     ).rejects.toThrow('No autorizado');
+  });
+
+  test('no puede leer ni la lista de Customers ni el detalle de uno, ni siquiera el suyo', async () => {
+    const { t } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    await seedRequest(t, ana, NOW - DAY);
+    const asAna = t.withIdentity({
+      subject: 'user_ana',
+      email: 'ana@example.com',
+      emailVerified: true,
+    });
+
+    await expect(asAna.query(api.supervisor.listCustomers, {})).rejects.toThrow('No autorizado');
+    await expect(asAna.query(api.supervisor.customerDetail, { customerId: ana })).rejects.toThrow(
+      'No autorizado'
+    );
   });
 });
 
@@ -615,5 +802,7 @@ describe('quien no tiene sesión', () => {
     expect(list.isDone).toBe(true);
 
     expect(await t.query(api.supervisor.requestDetail, { requestId: quote.requestId })).toBeNull();
+    expect(await t.query(api.supervisor.listCustomers, {})).toEqual([]);
+    expect(await t.query(api.supervisor.customerDetail, { customerId: ana })).toBeNull();
   });
 });

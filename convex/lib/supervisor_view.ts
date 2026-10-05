@@ -34,10 +34,32 @@ export interface SupervisorRequestRow {
 }
 
 export interface SupervisorCustomer {
+  /** Para enlazar a su detalle. */
+  _id: Id<'users'>;
   fullName: string;
   companyName: string;
   email: string;
   phone?: string;
+}
+
+/**
+ * Una fila de la lista de Customers: una persona, nunca una empresa. Sólo
+ * existe para quien ha enviado al menos una Replacement Request, así que
+ * `latestRequestAt` siempre está.
+ */
+export interface SupervisorCustomerRow extends Pick<
+  SupervisorCustomer,
+  '_id' | 'fullName' | 'companyName' | 'email'
+> {
+  requestCount: number;
+  latestRequestAt: number;
+}
+
+export interface SupervisorCustomerDetail extends SupervisorCustomer {
+  preferredLanguage: Doc<'users'>['preferredLanguage'];
+  signedUpAt: number;
+  /** Las suyas, de la más reciente a la más antigua, con la forma de la lista. */
+  requests: SupervisorRequestRow[];
 }
 
 export interface SupervisorRequestDetail {
@@ -73,7 +95,11 @@ export async function supervisorRow(
   ctx: QueryCtx,
   quote: Doc<'quotes'>
 ): Promise<SupervisorRequestRow> {
-  const user = await customerOf(ctx, quote);
+  return rowFor(quote, await customerOf(ctx, quote));
+}
+
+/** La fila, cuando el Customer ya está a mano. */
+function rowFor(quote: Doc<'quotes'>, user: Doc<'users'>): SupervisorRequestRow {
   return {
     _id: quote._id,
     requestId: quote.requestId,
@@ -96,6 +122,7 @@ export async function supervisorDetail(
     requestId: quote.requestId,
     receivedAt: quote._creationTime,
     customer: {
+      _id: user._id,
       fullName: user.fullName,
       companyName: user.companyName,
       email: user.email,
@@ -108,5 +135,36 @@ export async function supervisorDetail(
     quoteDocumentSentAt: quote.quoteDocumentSentAt,
     rejectionExplainedAt: quote.rejectionExplainedAt,
     hasQuoteDocument: hasQuoteDocument(quote),
+  };
+}
+
+/** Un Customer con sus Replacement Requests, ya leídas de la más reciente a la más antigua. */
+export function supervisorCustomerDetail(
+  user: Doc<'users'>,
+  quotes: Doc<'quotes'>[]
+): SupervisorCustomerDetail {
+  return {
+    _id: user._id,
+    fullName: user.fullName,
+    companyName: user.companyName,
+    email: user.email,
+    phone: user.phone,
+    preferredLanguage: user.preferredLanguage,
+    signedUpAt: user._creationTime,
+    requests: quotes.map((quote) => rowFor(quote, user)),
+  };
+}
+
+/** Una fila de la lista de Customers, con su actividad ya contada. */
+export function supervisorCustomerRow(
+  user: Doc<'users'>,
+  activity: Pick<SupervisorCustomerRow, 'requestCount' | 'latestRequestAt'>
+): SupervisorCustomerRow {
+  return {
+    _id: user._id,
+    fullName: user.fullName,
+    companyName: user.companyName,
+    email: user.email,
+    ...activity,
   };
 }

@@ -1,18 +1,16 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useConvexAuth, usePaginatedQuery } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { hasFilters, type RequestFilters } from '../../../convex/lib/request_filters';
-import { OutcomeTag } from './OutcomeTag';
-import { StackedCell } from './StackedCell';
 import { PeriodPicker } from './PeriodPicker';
 import { RequestFilterBar } from './RequestFilterBar';
+import { RequestTable } from './RequestTable';
 import { periodBounds, type PeriodPreset } from '@/lib/supervisor-period';
 import { listViewHref, readListView, type ListView } from '@/lib/supervisor-list-url';
-import { formatDateTime, SUPERVISOR_MESSAGES } from '@/lib/messages';
+import { SUPERVISOR_MESSAGES } from '@/lib/messages';
 
 const t = SUPERVISOR_MESSAGES;
 const PAGE_SIZE = 25;
@@ -23,9 +21,6 @@ const PAGE_SIZE = 25;
  *
  * El periodo y los filtros se leen de la URL y se escriben en ella, así que una
  * vista filtrada se puede enlazar y volver atrás la restaura.
- *
- * En pantallas estrechas la tabla deja de serlo: cada fila se apila como una
- * tarjeta con la etiqueta de cada dato delante, en vez de desplazarse de lado.
  */
 export function RequestList() {
   const view = readListView(useSearchParams());
@@ -87,58 +82,12 @@ function FilteredRequests({
           {hasFilters(filters) ? t.requests.emptyFiltered : t.requests.empty}
         </p>
       ) : (
-        <table className="mt-6 block md:table w-full text-sm">
-          <thead className="hidden md:table-header-group text-left text-gray-500">
-            <tr className="border-b border-gray-200 dark:border-gray-800">
-              <th className="py-2 pr-4 font-medium">{t.requests.columns.requestId}</th>
-              <th className="py-2 pr-4 font-medium">{t.requests.columns.receivedAt}</th>
-              <th className="py-2 pr-4 font-medium">{t.requests.columns.customer}</th>
-              <th className="py-2 pr-4 font-medium">{t.requests.columns.company}</th>
-              <th className="py-2 pr-4 font-medium text-right">{t.requests.columns.parts}</th>
-              <th className="py-2 font-medium">{t.requests.columns.outcome}</th>
-            </tr>
-          </thead>
-          <tbody className="block md:table-row-group space-y-3 md:space-y-0">
-            {results.map((row) => (
-              <tr
-                key={row._id}
-                className="relative block md:table-row rounded-lg border md:border-0 md:border-b border-gray-200 dark:border-gray-800 p-3 md:p-0 hover:bg-gray-50 dark:hover:bg-gray-900/50"
-              >
-                <StackedCell label={t.requests.columns.requestId}>
-                  {/* El enlace cubre la fila entera: toda ella abre el detalle. */}
-                  <Link
-                    href={`/supervisor/requests/${row.requestId}`}
-                    className="font-mono font-medium text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)] after:absolute after:inset-0"
-                  >
-                    {row.requestId}
-                  </Link>
-                </StackedCell>
-                <StackedCell label={t.requests.columns.receivedAt}>
-                  {formatDateTime(row.receivedAt, 'es')}
-                </StackedCell>
-                <StackedCell label={t.requests.columns.customer}>
-                  {/* Por encima del enlace de la fila: filtra en vez de abrir. */}
-                  <button
-                    type="button"
-                    onClick={() => onFilter({ ...filters, customerId: row.customerId })}
-                    title={t.requests.filters.onlyCustomer(row.customerName)}
-                    aria-label={t.requests.filters.onlyCustomer(row.customerName)}
-                    className="relative z-10 text-left hover:underline"
-                  >
-                    {row.customerName}
-                  </button>
-                </StackedCell>
-                <StackedCell label={t.requests.columns.company}>{row.companyName}</StackedCell>
-                <StackedCell label={t.requests.columns.parts} numeric>
-                  {row.partCount}
-                </StackedCell>
-                <StackedCell label={t.requests.columns.outcome}>
-                  <OutcomeTag outcome={row.outcome} />
-                </StackedCell>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="mt-6">
+          <RequestTable
+            rows={results}
+            onFilterCustomer={(customerId) => onFilter({ ...filters, customerId })}
+          />
+        </div>
       )}
 
       {status === 'CanLoadMore' && (
