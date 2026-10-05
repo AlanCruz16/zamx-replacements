@@ -5,15 +5,34 @@ import type { Doc } from '../../../../convex/_generated/dataModel';
 import { LANGUAGES, messagesFor } from '@/lib/messages';
 
 /**
- * Seam 2 — la descarga del Quote Document es una superficie del Customer, así
- * que autoriza sobre la identidad de Clerk y comprueba que esa identidad es
- * dueña de la Replacement Request. La lectura contra Convex es interna
- * justamente para que esta comprobación sea la única puerta.
+ * Seam 2 — la descarga del Quote Document autoriza sobre la identidad de Clerk
+ * por dos caminos: la identidad es dueña de la Replacement Request, o Convex la
+ * confirma como Supervisor. La lectura contra Convex es interna justamente para
+ * que estas comprobaciones sean la única puerta.
  */
 
-const { getAuth } = vi.hoisted(() => ({ getAuth: vi.fn() }));
+const { getAuth, fetchQuery } = vi.hoisted(() => ({
+  getAuth: vi.fn(),
+  fetchQuery: vi.fn(),
+}));
 
 vi.mock('@clerk/nextjs/server', () => ({ auth: getAuth }));
+
+// La pregunta «¿es Supervisor?» la contesta la consulta pública de Convex con
+// el token de quien llama; se corta en la frontera con la biblioteca.
+vi.mock('convex/nextjs', () => ({ fetchQuery }));
+
+/**
+ * Una sesión de Clerk con token para Convex, y lo que Convex contestará al
+ * preguntarle si es Supervisor.
+ */
+function signedInAs(userId: string, { supervisor }: { supervisor: boolean }) {
+  getAuth.mockResolvedValue({
+    userId,
+    getToken: vi.fn(async () => `token-de-${userId}`),
+  });
+  fetchQuery.mockResolvedValue(supervisor);
+}
 
 let convex: ReturnType<typeof stubInternalConvex>;
 
@@ -95,7 +114,7 @@ describe('GET /api/download-quote', () => {
   });
 
   test('un Customer no puede descargar la Replacement Request de otro', async () => {
-    getAuth.mockResolvedValue({ userId: 'user_beto' });
+    signedInAs('user_beto', { supervisor: false });
     convex.reply(INTERNAL_PATHS.details, quoteDetails());
     const GET = await loadHandler();
 
@@ -227,5 +246,109 @@ describe('GET /api/download-quote', () => {
 
     expect(res.status).toBe(409);
     expect(res.headers.get('Content-Type')).not.toBe('application/pdf');
+  });
+
+  test('el Customer dueño no necesita preguntarle a Convex si es Supervisor', async () => {
+    getAuth.mockResolvedValue({ userId: 'user_ana' });
+    convex.reply(INTERNAL_PATHS.details, quoteDetails());
+    const GET = await loadHandler();
+
+    await GET(request());
+
+    expect(fetchQuery).not.toHaveBeenCalled();
+  });
+
+  describe('el Supervisor', () => {
+    test('descarga el Quote Document de otro Customer', async () => {
+      signedInAs('user_sara', { supervisor: true });
+      convex.reply(INTERNAL_PATHS.details, quoteDetails());
+      const GET = await loadHandler();
+
+      const res = await GET(request());
+
+      expect(res.status).toBe(200);
+      expect(res.headers.get('Content-Type')).toBe('application/pdf');
+      // Se le pregunta a Convex con el token de quien llama, no con otro.
+      expect(fetchQuery).toHaveBeenCalledWith(
+        expect.anything(),
+        {},
+        { token: 'token-de-user_sara' }
+      );
+    });
+
+    test('sin token de Convex no entra: falla cerrado', async () => {
+      getAuth.mockResolvedValue({ userId: 'user_sara', getToken: vi.fn(async () => null) });
+      fetchQuery.mockResolvedValue(true);
+      convex.reply(INTERNAL_PATHS.details, quoteDetails());
+      const GET = await loadHandler();
+
+      const res = await GET(request());
+
+      expect(res.status).toBe(401);
+    });
+
+    /**
+     * Si Convex no contesta, quien no es dueño recibe la misma negativa de
+     * siempre: ni un 500 ni el texto del error.
+     */
+    test('si la pregunta a Convex falla, un no dueño es rechazado como siempre', async () => {
+      signedInAs('user_beto', { supervisor: true });
+      fetchQuery.mockRejectedValue(new Error('Convex caído: detalle interno'));
+      convex.reply(INTERNAL_PATHS.details, quoteDetails());
+      const GET = await loadHandler();
+
+      const res = await GET(request());
+
+      expect(res.status).toBe(401);
+      await expect(res.text()).resolves.not.toContain('detalle interno');
+    });
+
+    /**
+     * Es el documento que recibió el Customer, así que va en su idioma: el
+     * Supervisor no tiene idioma preferido que valga aquí.
+     */
+    test.each([
+      ['es', 'Cotizacion_REQ-V59X9B.pdf'],
+      ['en', 'Quotation_REQ-V59X9B.pdf'],
+    ] as const)(
+      'recibe el PDF en el idioma del Customer (%s)',
+      async (preferredLanguage, filename) => {
+        signedInAs('user_sara', { supervisor: true });
+        convex.reply(INTERNAL_PATHS.details, quoteDetails({ preferredLanguage }));
+        const GET = await loadHandler();
+
+        const res = await GET(request());
+
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Content-Disposition')).toContain(filename);
+      }
+    );
+
+    test('no recibe PDF de una Replacement Request todavía en revisión', async () => {
+      signedInAs('user_sara', { supervisor: true });
+      const { quote, user } = quoteDetails();
+      delete (quote as { outcome?: string }).outcome;
+      convex.reply(INTERNAL_PATHS.details, { quote, user });
+      const GET = await loadHandler();
+
+      const res = await GET(request());
+
+      expect(res.status).toBe(409);
+      expect(res.headers.get('Content-Type')).not.toBe('application/pdf');
+    });
+
+    test('no recibe PDF si una pieza no tiene Confirmed Price', async () => {
+      signedInAs('user_sara', { supervisor: true });
+      const { quote, user } = quoteDetails();
+      const [priced] = quote.products;
+      quote.products = [priced, { ...priced, partNumber: 'P-002', confirmedPriceUSD: undefined }];
+      convex.reply(INTERNAL_PATHS.details, { quote, user });
+      const GET = await loadHandler();
+
+      const res = await GET(request());
+
+      expect(res.status).toBe(409);
+      expect(res.headers.get('Content-Type')).not.toBe('application/pdf');
+    });
   });
 });

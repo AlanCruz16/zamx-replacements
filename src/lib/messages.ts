@@ -582,7 +582,7 @@ export const SUPERVISOR_MESSAGES = {
     rejectionExplainedAt: 'Rechazo explicado',
     notYet: 'Todavía no',
     quoteDocument: 'Cotización (PDF)',
-    hasQuoteDocument: 'Existe',
+    downloadQuoteDocument: 'Descargar PDF',
     noQuoteDocument: 'No existe',
     partsHeading: 'Piezas',
     partColumns: {

@@ -28,10 +28,20 @@ export const requireSupervisorPage = cache(async (): Promise<void> => {
   const { userId, getToken, redirectToSignIn } = await auth();
   if (!userId) redirectToSignIn();
 
-  // Sin token no hay identidad que Convex pueda comprobar: falla cerrado.
-  const token = await getToken({ template: 'convex' });
-  if (!token) notFound();
-
-  const isSupervisor = await fetchQuery(api.supervisor.amISupervisor, {}, { token });
-  if (!isSupervisor) notFound();
+  if (!(await isSupervisorPerConvex(getToken))) notFound();
 });
+
+/**
+ * Le pregunta a Convex, con el token de Clerk de quien llama, si es Supervisor.
+ * La comparten esta puerta y la descarga del Quote Document, para que la lista
+ * se lea en un solo sitio. Sin token no hay identidad que Convex pueda
+ * comprobar: falla cerrado.
+ */
+export async function isSupervisorPerConvex(
+  getToken: (options: { template: string }) => Promise<string | null>
+): Promise<boolean> {
+  const token = await getToken({ template: 'convex' });
+  if (!token) return false;
+
+  return fetchQuery(api.supervisor.amISupervisor, {}, { token });
+}

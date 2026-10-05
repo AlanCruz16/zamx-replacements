@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useConvexAuth, useQuery } from 'convex/react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Download } from 'lucide-react';
 import { api } from '../../../convex/_generated/api';
 import type { SupervisorProduct } from '../../../convex/lib/supervisor_view';
 import { OutcomeTag } from './OutcomeTag';
@@ -89,7 +89,11 @@ export function RequestDetail({ requestId }: { requestId: string }) {
                 [t.request.rejectionExplainedAt, sentAtOrNotYet(request.rejectionExplainedAt)],
                 [
                   t.request.quoteDocument,
-                  request.hasQuoteDocument ? t.request.hasQuoteDocument : t.request.noQuoteDocument,
+                  request.hasQuoteDocument ? (
+                    <QuoteDocumentLink requestId={request.requestId} />
+                  ) : (
+                    t.request.noQuoteDocument
+                  ),
                 ],
               ]}
             />
@@ -108,6 +112,25 @@ function sentAtOrNotYet(timestamp: number | undefined): string {
   return timestamp === undefined ? t.request.notYet : formatDateTime(timestamp, 'es');
 }
 
+/**
+ * El mismo PDF que recibió el Customer, en su idioma. Sólo se ofrece cuando la
+ * regla compartida dice que hay Quote Document; la ruta lo vuelve a comprobar
+ * en el servidor de todos modos.
+ */
+function QuoteDocumentLink({ requestId }: { requestId: string }) {
+  return (
+    <a
+      href={`/api/download-quote?quoteId=${encodeURIComponent(requestId)}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 dark:border-blue-800/50 bg-blue-50 dark:bg-blue-900/20 px-3 py-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors"
+    >
+      <Download className="w-4 h-4" aria-hidden />
+      {t.request.downloadQuoteDocument}
+    </a>
+  );
+}
+
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-gray-200 dark:border-gray-800 p-4">
@@ -117,7 +140,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-function Facts({ facts }: { facts: [string, string][] }) {
+function Facts({ facts }: { facts: [string, React.ReactNode][] }) {
   return (
     <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
       {facts.map(([label, value]) => (
