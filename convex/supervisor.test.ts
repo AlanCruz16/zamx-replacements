@@ -741,7 +741,151 @@ describe('el detalle de un Customer', () => {
   });
 });
 
+/**
+ * El resumen del panel: cuántas llegaron en el periodo, cómo se reparten por
+ * Outcome, quién pide más y cuántos se dieron de alta sin pedir nada.
+ */
+describe('el resumen', () => {
+  test('cuenta las recibidas en el periodo, por Outcome, y deja fuera las de antes', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    // Fuera del periodo: no cuenta en nada.
+    await seedRequest(t, ana, NOW - 40 * DAY, { outcome: 'discontinued' });
+    await seedRequest(t, ana, NOW - 20 * DAY);
+    await seedRequest(t, ana, NOW - 15 * DAY, { outcome: 'discontinued' });
+    await seedRequest(t, ana, NOW - 10 * DAY, { outcome: 'blocked_pending_info' });
+    await seedRequest(t, ana, NOW - 5 * DAY, { outcome: 'priced_as_suggested' });
+    await seedRequest(t, ana, NOW - 1 * DAY);
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: { start: NOW - 30 * DAY },
+    });
+
+    expect(summary?.received).toBe(5);
+    expect(summary?.byOutcome).toEqual({
+      // Exactamente las que no tienen Outcome; `blocked_pending_info` va aparte.
+      awaiting_review: 2,
+      priced_as_suggested: 1,
+      priced_differently: 0,
+      oem_restricted: 0,
+      discontinued: 1,
+      blocked_pending_info: 1,
+    });
+  });
+
+  test('deja fuera las recibidas desde el final del periodo', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    await seedRequest(t, ana, NOW - 20 * DAY, { products: [{ ...PRICED_PART, quantity: 4 }] });
+    // Justo en el final, que no se incluye.
+    await seedRequest(t, ana, NOW - 10 * DAY, { outcome: 'discontinued' });
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: { start: NOW - 30 * DAY, end: NOW - 10 * DAY },
+    });
+
+    expect(summary?.received).toBe(1);
+    expect(summary?.byOutcome.discontinued).toBe(0);
+    expect(summary?.topCustomers).toEqual([
+      expect.objectContaining({ requestCount: 1, unitCount: 4 }),
+    ]);
+  });
+
+  test('sin periodo cuenta todo', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    await seedRequest(t, ana, NOW - 400 * DAY);
+    await seedRequest(t, ana, NOW - DAY);
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, { period: {} });
+
+    expect(summary?.received).toBe(2);
+  });
+
+  test('los Customers que más piden, como mucho cinco, con sus unidades sumadas', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const names = ['Ana', 'Bruno', 'Carla', 'Diego', 'Elena', 'Fer'];
+    const ids = [];
+    for (const name of names) ids.push(await seedCustomer(t, name));
+    const [ana, bruno, carla, diego, elena, fer] = ids;
+
+    // Lo que pidió Bruno antes del periodo no le sube en el ranking.
+    await seedRequest(t, bruno, NOW - 60 * DAY);
+    await seedRequest(t, bruno, NOW - 50 * DAY);
+
+    // Ana: 3 solicitudes; Bruno: 2; Carla, Diego, Elena: 1; Fer: 1 pero con más unidades.
+    let at = NOW - 25 * DAY;
+    const next = () => (at += DAY);
+    await seedRequest(t, ana, next(), { products: [PRICED_PART, UNPRICED_PART] });
+    await seedRequest(t, ana, next());
+    await seedRequest(t, ana, next(), { products: [{ ...PRICED_PART, quantity: 5 }] });
+    await seedRequest(t, bruno, next());
+    await seedRequest(t, bruno, next(), { products: [UNPRICED_PART] });
+    await seedRequest(t, carla, next());
+    await seedRequest(t, diego, next());
+    await seedRequest(t, elena, next(), { products: [UNPRICED_PART] });
+    await seedRequest(t, fer, next(), { products: [{ ...PRICED_PART, quantity: 10 }] });
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: { start: NOW - 30 * DAY },
+    });
+
+    expect(summary?.topCustomers).toHaveLength(5);
+    expect(summary?.topCustomers[0]).toEqual({
+      customerId: ana,
+      fullName: 'Ana',
+      companyName: 'Empresa de Ana',
+      requestCount: 3,
+      // 2 + 1, luego 2, luego 5.
+      unitCount: 10,
+    });
+    expect(summary?.topCustomers[1]).toMatchObject({
+      customerId: bruno,
+      requestCount: 2,
+      unitCount: 3,
+    });
+    // Empatados a una solicitud, desempata quien pidió más unidades; Elena queda fuera.
+    expect(summary?.topCustomers.slice(2).map((row) => [row.customerId, row.unitCount])).toEqual([
+      [fer, 10],
+      [carla, 2],
+      [diego, 2],
+    ]);
+  });
+
+  test('cuenta a quien se dio de alta y nunca pidió nada, sin mirar el periodo', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    const bruno = await seedCustomer(t, 'Bruno');
+    await seedCustomer(t, 'Carla');
+    await seedCustomer(t, 'Diego');
+    await seedRequest(t, ana, NOW - DAY);
+    // Pidió hace mucho, fuera del periodo: ya no es «nunca».
+    await seedRequest(t, bruno, NOW - 200 * DAY);
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: { start: NOW - 30 * DAY },
+    });
+
+    expect(summary?.neverRequested).toBe(2);
+  });
+});
+
 describe('quien no es Supervisor', () => {
+  test('no puede leer el resumen', async () => {
+    const { t } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    await seedRequest(t, ana, NOW - DAY);
+    const asAna = t.withIdentity({
+      subject: 'user_ana',
+      email: 'ana@example.com',
+      emailVerified: true,
+    });
+
+    await expect(asAna.query(api.supervisor.dashboard, { period: {} })).rejects.toThrow(
+      'No autorizado'
+    );
+  });
+
   test('no puede leer ni la lista ni el detalle', async () => {
     const { t } = supervisorConvex();
     const ana = await seedCustomer(t, 'Ana');
@@ -804,5 +948,6 @@ describe('quien no tiene sesión', () => {
     expect(await t.query(api.supervisor.requestDetail, { requestId: quote.requestId })).toBeNull();
     expect(await t.query(api.supervisor.listCustomers, {})).toEqual([]);
     expect(await t.query(api.supervisor.customerDetail, { customerId: ana })).toBeNull();
+    expect(await t.query(api.supervisor.dashboard, { period: {} })).toBeNull();
   });
 });

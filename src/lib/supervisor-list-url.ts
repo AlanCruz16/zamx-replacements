@@ -31,20 +31,33 @@ function text(params: URLSearchParams, key: string): string | undefined {
   return value ? value : undefined;
 }
 
-export function readListView(params: URLSearchParams): ListView {
+/**
+ * El preajuste de periodo de la URL. Lo lee también el resumen, con la misma
+ * clave, para que volver atrás desde una lista enlazada lo conserve.
+ */
+export function readPeriodPreset(params: URLSearchParams): PeriodPreset {
   const preset = text(params, KEYS.preset);
+  return preset && isPreset(preset) ? preset : DEFAULT_PERIOD;
+}
+
+export function readListView(params: URLSearchParams): ListView {
   const outcome = text(params, KEYS.outcome);
   const customerId = text(params, KEYS.customerId);
   const requestId = text(params, KEYS.requestId);
 
   return {
-    preset: preset && isPreset(preset) ? preset : DEFAULT_PERIOD,
+    preset: readPeriodPreset(params),
     filters: {
       ...(outcome && isOutcomeFilter(outcome) ? { outcome } : {}),
       ...(customerId ? { customerId } : {}),
       ...(requestId ? { requestId } : {}),
     },
   };
+}
+
+/** La dirección del resumen con este periodo; el de por defecto no se escribe. */
+export function dashboardHref(preset: PeriodPreset): string {
+  return preset === DEFAULT_PERIOD ? '/supervisor' : `/supervisor?${KEYS.preset}=${preset}`;
 }
 
 /**

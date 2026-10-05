@@ -504,7 +504,6 @@ export const SUPERVISOR_MESSAGES = {
     customers: 'Clientes',
   },
   logoAlt: 'Logo ZIEHL-ABEGG',
-  comingSoon: 'Esta sección todavía está en construcción.',
 
   /** El periodo, por fecha de recepción: `supervisor-period.ts`. */
   period: {
@@ -529,6 +528,26 @@ export const SUPERVISOR_MESSAGES = {
     blocked_pending_info: 'Requiere más información',
   } satisfies Record<Outcome, string>,
   awaitingReview: 'En revisión',
+
+  /** El resumen: `Dashboard.tsx`. Volumen y quién pide; nunca dinero. */
+  dashboard: {
+    loading: 'Cargando resumen…',
+    received: 'Solicitudes recibidas',
+    byOutcomeHeading: 'Por resultado',
+    /** A la lista filtrada por ese resultado y el mismo periodo. */
+    openOutcome: (label: string) => `Ver las solicitudes: ${label}`,
+    topCustomersHeading: 'Clientes que más piden',
+    topColumns: {
+      customer: 'Cliente',
+      company: 'Empresa',
+      requests: 'Solicitudes',
+      units: 'Unidades',
+    },
+    noTopCustomers: 'Nadie envió solicitudes en este periodo.',
+    neverRequested: 'Se dieron de alta y nunca pidieron nada',
+    /** No es un hecho del periodo, sino un estado: no lo mira. */
+    neverRequestedNote: 'Desde siempre; no depende del periodo.',
+  },
 
   /** La lista de Replacement Requests: `RequestList.tsx`. */
   requests: {

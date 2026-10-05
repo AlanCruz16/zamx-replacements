@@ -8,6 +8,7 @@ import {
   matchesCompany,
   sortCustomers,
 } from './lib/customer_list';
+import { dashboardSummary, type DashboardSummary } from './lib/dashboard';
 import { filteredRequests, periodValidator, requestFiltersValidator } from './lib/request_filters';
 import { callerIsSupervisor, requireSupervisor } from './lib/supervisors';
 import {
@@ -30,6 +31,18 @@ import {
 export const amISupervisor = query({
   args: {},
   handler: async (ctx) => callerIsSupervisor(ctx),
+});
+
+/**
+ * El resumen del periodo (`lib/dashboard.ts`). `null` sin sesión, para que la
+ * pantalla no pinte ceros que no son.
+ */
+export const dashboard = query({
+  args: { period: periodValidator },
+  handler: async (ctx, { period }): Promise<DashboardSummary | null> => {
+    if ((await requireSupervisor(ctx)) === 'signed_out') return null;
+    return dashboardSummary(ctx, period);
+  },
 });
 
 /**

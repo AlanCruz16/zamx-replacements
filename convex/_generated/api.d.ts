@@ -17,6 +17,7 @@ import type * as lib_approvers from "../lib/approvers.js";
 import type * as lib_chat from "../lib/chat.js";
 import type * as lib_customer_list from "../lib/customer_list.js";
 import type * as lib_customer_view from "../lib/customer_view.js";
+import type * as lib_dashboard from "../lib/dashboard.js";
 import type * as lib_delivery from "../lib/delivery.js";
 import type * as lib_inbox_seen from "../lib/inbox_seen.js";
 import type * as lib_outcome from "../lib/outcome.js";
@@ -53,6 +54,7 @@ declare const fullApi: ApiFromModules<{
   "lib/chat": typeof lib_chat;
   "lib/customer_list": typeof lib_customer_list;
   "lib/customer_view": typeof lib_customer_view;
+  "lib/dashboard": typeof lib_dashboard;
   "lib/delivery": typeof lib_delivery;
   "lib/inbox_seen": typeof lib_inbox_seen;
   "lib/outcome": typeof lib_outcome;

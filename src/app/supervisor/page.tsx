@@ -1,8 +1,7 @@
-import { EmptySection } from '@/components/supervisor/EmptySection';
-import { SUPERVISOR_MESSAGES as t } from '@/lib/messages';
+import { Dashboard } from '@/components/supervisor/Dashboard';
 import { requireSupervisorPage } from '@/lib/supervisor-access';
 
 export default async function SupervisorDashboardPage() {
   await requireSupervisorPage();
-  return <EmptySection title={t.nav.dashboard} />;
+  return <Dashboard />;
 }
