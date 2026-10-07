@@ -2,6 +2,7 @@ import type { Id } from '../_generated/dataModel';
 import type { QueryCtx } from '../_generated/server';
 import { AWAITING_REVIEW, OUTCOME_FILTERS, type OutcomeFilter } from './outcome';
 import { filteredRequests, type Period } from './request_filters';
+import { weeklyCounts, type WeekClock, type WeeklyCount } from './weeks';
 
 /**
  * El resumen del panel del Supervisor: volumen y quién pide, nunca dinero.
@@ -39,19 +40,27 @@ export interface DashboardSummary {
    * hecho del periodo, así que no lo mira.
    */
   neverRequested: number;
+  /** Las recibidas por semana, de lunes a lunes, con las semanas vacías a cero (`weeks.ts`). */
+  weekly: WeeklyCount[];
 }
 
-export async function dashboardSummary(ctx: QueryCtx, period: Period): Promise<DashboardSummary> {
+export async function dashboardSummary(
+  ctx: QueryCtx,
+  period: Period,
+  clock: WeekClock
+): Promise<DashboardSummary> {
   const byOutcome = Object.fromEntries(OUTCOME_FILTERS.map((filter) => [filter, 0])) as Record<
     OutcomeFilter,
     number
   >;
   const activity = new Map<Id<'users'>, { requestCount: number; unitCount: number }>();
+  const receivedAt: number[] = [];
   let received = 0;
 
   // Sin filtros nunca es `null`: eso sólo pasa con un Customer imposible.
   for await (const quote of filteredRequests(ctx, period, {})!) {
     received++;
+    receivedAt.push(quote._creationTime);
     byOutcome[quote.outcome ?? AWAITING_REVIEW]++;
 
     const counted = activity.get(quote.userId) ?? { requestCount: 0, unitCount: 0 };
@@ -83,6 +92,7 @@ export async function dashboardSummary(ctx: QueryCtx, period: Period): Promise<D
     byOutcome,
     topCustomers: ranked.slice(0, TOP_CUSTOMERS),
     neverRequested: await countNeverRequested(ctx),
+    weekly: weeklyCounts(receivedAt, period, clock),
   };
 }
 

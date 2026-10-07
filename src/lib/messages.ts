@@ -71,6 +71,14 @@ export function formatDateTime(timestamp: number, language: Language): string {
   });
 }
 
+/** Día y mes abreviado, sin año: las etiquetas de la serie semanal. */
+export function formatDayMonth(timestamp: number, language: Language): string {
+  return new Date(timestamp).toLocaleDateString(localeOf(language), {
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
 /**
  * Un importe en dólares. La divisa **no** sigue al idioma: los precios de ZAMX
  * están en USD y lo estarán lea quien lea el documento. Lo que sigue al idioma
@@ -547,6 +555,17 @@ export const SUPERVISOR_MESSAGES = {
     neverRequested: 'Se dieron de alta y nunca pidieron nada',
     /** No es un hecho del periodo, sino un estado: no lo mira. */
     neverRequestedNote: 'Desde siempre; no depende del periodo.',
+    /** La serie semanal: `WeeklyChart.tsx`. Una sola serie, sin partir por Outcome. */
+    weekly: {
+      heading: 'Solicitudes recibidas por semana',
+      note: 'Semanas de lunes a domingo.',
+      empty: 'Todavía no ha llegado ninguna solicitud.',
+      week: (start: string) => `Semana del ${start}`,
+      count: (count: number) => (count === 1 ? '1 solicitud' : `${count} solicitudes`),
+      chartLabel: (weeks: number) => `Gráfica de barras: solicitudes recibidas en ${weeks} semanas`,
+      showTable: 'Ver como tabla',
+      columns: { week: 'Semana del', count: 'Solicitudes' },
+    },
   },
 
   /** La lista de Replacement Requests: `RequestList.tsx`. */

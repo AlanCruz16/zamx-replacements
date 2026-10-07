@@ -9,6 +9,7 @@ import {
   sortCustomers,
 } from './lib/customer_list';
 import { dashboardSummary, type DashboardSummary } from './lib/dashboard';
+import { weekClockValidator } from './lib/weeks';
 import { filteredRequests, periodValidator, requestFiltersValidator } from './lib/request_filters';
 import { callerIsSupervisor, requireSupervisor } from './lib/supervisors';
 import {
@@ -38,10 +39,10 @@ export const amISupervisor = query({
  * pantalla no pinte ceros que no son.
  */
 export const dashboard = query({
-  args: { period: periodValidator },
-  handler: async (ctx, { period }): Promise<DashboardSummary | null> => {
+  args: { period: periodValidator, clock: weekClockValidator },
+  handler: async (ctx, { period, clock }): Promise<DashboardSummary | null> => {
     if ((await requireSupervisor(ctx)) === 'signed_out') return null;
-    return dashboardSummary(ctx, period);
+    return dashboardSummary(ctx, period, clock);
   },
 });
 

@@ -32,6 +32,7 @@ import type * as lib_supervisor_authority from "../lib/supervisor_authority.js";
 import type * as lib_supervisor_view from "../lib/supervisor_view.js";
 import type * as lib_supervisors from "../lib/supervisors.js";
 import type * as lib_totals from "../lib/totals.js";
+import type * as lib_weeks from "../lib/weeks.js";
 import type * as poller from "../poller.js";
 import type * as quotes from "../quotes.js";
 import type * as rate_limit from "../rate_limit.js";
@@ -69,6 +70,7 @@ declare const fullApi: ApiFromModules<{
   "lib/supervisor_view": typeof lib_supervisor_view;
   "lib/supervisors": typeof lib_supervisors;
   "lib/totals": typeof lib_totals;
+  "lib/weeks": typeof lib_weeks;
   poller: typeof poller;
   quotes: typeof quotes;
   rate_limit: typeof rate_limit;

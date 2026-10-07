@@ -9,6 +9,7 @@ import { AWAITING_REVIEW, OUTCOME_FILTERS } from '../../../convex/lib/outcome';
 import { Card } from './Card';
 import { PeriodPicker } from './PeriodPicker';
 import { StackedCell } from './StackedCell';
+import { WeeklyChart } from './WeeklyChart';
 import { periodBounds, type PeriodPreset } from '@/lib/supervisor-period';
 import { dashboardHref, listViewHref, readPeriodPreset } from '@/lib/supervisor-list-url';
 import { SUPERVISOR_MESSAGES } from '@/lib/messages';
@@ -43,11 +44,18 @@ export function Dashboard() {
 }
 
 function Figures({ preset }: { preset: PeriodPreset }) {
-  const [period] = useState(() => periodBounds(preset, Date.now()));
+  // El reloj va con el periodo: la consulta no puede leerlo (`convex/lib/weeks.ts`).
+  const [{ period, clock }] = useState(() => {
+    const now = Date.now();
+    return {
+      period: periodBounds(preset, now),
+      clock: { now, utcOffsetMinutes: -new Date(now).getTimezoneOffset() },
+    };
+  });
 
   // Sin el token en Convex todavía, `null` se pintaría como ceros.
   const { isAuthenticated } = useConvexAuth();
-  const summary = useQuery(api.supervisor.dashboard, isAuthenticated ? { period } : 'skip');
+  const summary = useQuery(api.supervisor.dashboard, isAuthenticated ? { period, clock } : 'skip');
 
   if (!summary) return <p className="mt-6 text-sm text-gray-500">{t.dashboard.loading}</p>;
 
@@ -61,6 +69,12 @@ function Figures({ preset }: { preset: PeriodPreset }) {
         <p className="text-4xl font-semibold tabular-nums">{summary.neverRequested}</p>
         <p className="mt-1 text-xs text-gray-500">{t.dashboard.neverRequestedNote}</p>
       </Card>
+
+      <div className="md:col-span-2">
+        <Card title={t.dashboard.weekly.heading}>
+          <WeeklyChart weeks={summary.weekly} />
+        </Card>
+      </div>
 
       <Card title={t.dashboard.byOutcomeHeading}>
         <ul className="divide-y divide-gray-200 dark:divide-gray-800 text-sm">

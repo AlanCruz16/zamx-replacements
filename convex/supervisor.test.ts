@@ -146,7 +146,10 @@ type StoredQuote = Omit<Doc<'quotes'>, '_id' | '_creationTime' | 'userId'>;
 type StoredProduct = StoredQuote['products'][number];
 
 const DAY = 24 * 60 * 60 * 1000;
+/** Domingo: la semana en curso empezó el lunes 28 de septiembre. */
 const NOW = Date.UTC(2026, 9, 4, 12);
+/** El reloj que manda el navegador al resumen: en UTC, salvo donde se diga. */
+const CLOCK = { now: NOW, utcOffsetMinutes: 0 };
 
 const PRICED_PART: StoredProduct = {
   partNumber: 'P-001',
@@ -759,6 +762,7 @@ describe('el resumen', () => {
 
     const summary = await asSupervisor.query(api.supervisor.dashboard, {
       period: { start: NOW - 30 * DAY },
+      clock: CLOCK,
     });
 
     expect(summary?.received).toBe(5);
@@ -782,6 +786,7 @@ describe('el resumen', () => {
 
     const summary = await asSupervisor.query(api.supervisor.dashboard, {
       period: { start: NOW - 30 * DAY, end: NOW - 10 * DAY },
+      clock: CLOCK,
     });
 
     expect(summary?.received).toBe(1);
@@ -797,7 +802,10 @@ describe('el resumen', () => {
     await seedRequest(t, ana, NOW - 400 * DAY);
     await seedRequest(t, ana, NOW - DAY);
 
-    const summary = await asSupervisor.query(api.supervisor.dashboard, { period: {} });
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: {},
+      clock: CLOCK,
+    });
 
     expect(summary?.received).toBe(2);
   });
@@ -828,6 +836,7 @@ describe('el resumen', () => {
 
     const summary = await asSupervisor.query(api.supervisor.dashboard, {
       period: { start: NOW - 30 * DAY },
+      clock: CLOCK,
     });
 
     expect(summary?.topCustomers).toHaveLength(5);
@@ -864,9 +873,104 @@ describe('el resumen', () => {
 
     const summary = await asSupervisor.query(api.supervisor.dashboard, {
       period: { start: NOW - 30 * DAY },
+      clock: CLOCK,
     });
 
     expect(summary?.neverRequested).toBe(2);
+  });
+
+  test('cuenta por semana, de lunes a lunes, con las semanas vacías a cero', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    // Antes del periodo: no cuenta en ninguna semana.
+    await seedRequest(t, ana, Date.UTC(2026, 8, 13, 11));
+    // El domingo 13 hasta su último milisegundo es de la semana del lunes 7…
+    await seedRequest(t, ana, Date.UTC(2026, 8, 13, 13));
+    await seedRequest(t, ana, Date.UTC(2026, 8, 14) - 1);
+    // …y la medianoche del lunes 14 ya es de la siguiente.
+    await seedRequest(t, ana, Date.UTC(2026, 8, 14));
+    // Nada la semana del 21.
+    await seedRequest(t, ana, Date.UTC(2026, 8, 28, 9));
+    await seedRequest(t, ana, NOW - 1000);
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: { start: Date.UTC(2026, 8, 13, 12) },
+      clock: CLOCK,
+    });
+
+    expect(summary?.weekly).toEqual([
+      { weekStart: Date.UTC(2026, 8, 7), count: 2 },
+      { weekStart: Date.UTC(2026, 8, 14), count: 1 },
+      { weekStart: Date.UTC(2026, 8, 21), count: 0 },
+      { weekStart: Date.UTC(2026, 8, 28), count: 2 },
+    ]);
+  });
+
+  test('las semanas empiezan el lunes en la hora de quien mira', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    // Lunes 28 a las 03:00 UTC: en Ciudad de México (UTC−6) todavía es domingo.
+    await seedRequest(t, ana, Date.UTC(2026, 8, 28, 3));
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: { start: Date.UTC(2026, 8, 25) },
+      clock: { now: NOW, utcOffsetMinutes: -360 },
+    });
+
+    // El lunes a medianoche en México son las 06:00 UTC.
+    expect(summary?.weekly).toEqual([
+      { weekStart: Date.UTC(2026, 8, 21, 6), count: 1 },
+      { weekStart: Date.UTC(2026, 8, 28, 6), count: 0 },
+    ]);
+  });
+
+  test('con «todo», la serie empieza en la semana de la primera recibida', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    // Miércoles 19 de agosto: su semana empieza el lunes 17.
+    await seedRequest(t, ana, Date.UTC(2026, 7, 19, 15));
+    await seedRequest(t, ana, NOW - DAY);
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: {},
+      clock: CLOCK,
+    });
+
+    const weekly = summary?.weekly ?? [];
+    expect(weekly[0]).toEqual({ weekStart: Date.UTC(2026, 7, 17), count: 1 });
+    // Del 17 de agosto al 28 de septiembre: siete semanas, la última la de hoy.
+    expect(weekly).toHaveLength(7);
+    expect(weekly.at(-1)).toEqual({ weekStart: Date.UTC(2026, 8, 28), count: 1 });
+    expect(weekly.slice(1, -1).every((week) => week.count === 0)).toBe(true);
+  });
+
+  test('con «todo» y ninguna recibida, la serie está vacía', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    await seedCustomer(t, 'Ana');
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: {},
+      clock: CLOCK,
+    });
+
+    expect(summary?.weekly).toEqual([]);
+  });
+
+  test('una recibida después de `now` alarga la serie en vez de perderse', async () => {
+    const { t, asSupervisor } = supervisorConvex();
+    const ana = await seedCustomer(t, 'Ana');
+    // El navegador resolvió el periodo el domingo; esta llega el lunes siguiente.
+    await seedRequest(t, ana, Date.UTC(2026, 9, 5, 9));
+
+    const summary = await asSupervisor.query(api.supervisor.dashboard, {
+      period: { start: Date.UTC(2026, 8, 28) },
+      clock: CLOCK,
+    });
+
+    expect(summary?.weekly).toEqual([
+      { weekStart: Date.UTC(2026, 8, 28), count: 0 },
+      { weekStart: Date.UTC(2026, 9, 5), count: 1 },
+    ]);
   });
 });
 
@@ -881,9 +985,9 @@ describe('quien no es Supervisor', () => {
       emailVerified: true,
     });
 
-    await expect(asAna.query(api.supervisor.dashboard, { period: {} })).rejects.toThrow(
-      'No autorizado'
-    );
+    await expect(
+      asAna.query(api.supervisor.dashboard, { period: {}, clock: CLOCK })
+    ).rejects.toThrow('No autorizado');
   });
 
   test('no puede leer ni la lista ni el detalle', async () => {
@@ -948,6 +1052,6 @@ describe('quien no tiene sesión', () => {
     expect(await t.query(api.supervisor.requestDetail, { requestId: quote.requestId })).toBeNull();
     expect(await t.query(api.supervisor.listCustomers, {})).toEqual([]);
     expect(await t.query(api.supervisor.customerDetail, { customerId: ana })).toBeNull();
-    expect(await t.query(api.supervisor.dashboard, { period: {} })).toBeNull();
+    expect(await t.query(api.supervisor.dashboard, { period: {}, clock: CLOCK })).toBeNull();
   });
 });
