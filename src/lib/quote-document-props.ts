@@ -2,7 +2,7 @@ import type { Doc } from '../../convex/_generated/dataModel';
 import type { QuoteDocumentProps } from '@/components/pdf/QuoteDocument';
 import { QUOTE_CONTACT } from './addresses';
 import { quoteLogoSrc } from './quote-logo';
-import { quoteDocumentLines } from './quote-document';
+import { quoteDocumentLines } from '../../convex/lib/quote_document';
 import { formatDate, resolveLanguage } from './messages';
 
 /**

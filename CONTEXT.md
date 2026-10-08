@@ -50,6 +50,10 @@ _Avoid_: client, user, cliente
 A ZIEHL-ABEGG salesperson authorised to turn a Suggested Price into a Confirmed Price. Authority comes from being on the configured list of approver addresses — job title is irrelevant to the system.
 _Avoid_: employee, admin, sales rep, vendedor
 
+**Supervisor**:
+A ZIEHL-ABEGG person authorised to oversee every Replacement Request and every Customer, without acting on any of them. Authority comes from being on the configured list of supervisor addresses. It is independent of Approver authority: one person may hold both, either, or neither.
+_Avoid_: admin, superuser, manager
+
 ### Progress
 
 **Outcome**:

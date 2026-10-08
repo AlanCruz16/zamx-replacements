@@ -5,6 +5,7 @@ import { QuoteDocument } from '@/components/pdf/QuoteDocument';
 import { quoteDocumentProps } from '@/lib/quote-document-props';
 import { fetchQuoteDetails } from '@/lib/internal-api';
 import { messagesFor, resolveLanguage, DEFAULT_LANGUAGE } from '@/lib/messages';
+import { isSupervisorPerConvex } from '@/lib/supervisor-access';
 import React from 'react';
 
 export async function GET(req: Request) {
@@ -16,7 +17,7 @@ export async function GET(req: Request) {
       return new NextResponse('Falta quoteId', { status: 400 });
     }
 
-    const { userId } = await auth();
+    const { userId, getToken } = await auth();
     if (!userId) {
       return new NextResponse('Unauthorized', { status: 401 });
     }
@@ -32,13 +33,18 @@ export async function GET(req: Request) {
       });
     }
 
+    // El idioma es siempre el del Customer, también cuando descarga un
+    // Supervisor: el PDF tiene que ser el documento que el Customer recibió.
     const { user } = data;
     const language = resolveLanguage(user.preferredLanguage);
 
-    // Camino del Customer: la identidad de Clerk tiene que ser dueña de la
-    // Replacement Request. La lectura de arriba es interna precisamente para que
-    // esta comprobación sea la única puerta.
-    if (user.clerkId !== userId) {
+    // Dos caminos, y sólo dos. El del Customer: la identidad de Clerk es dueña
+    // de la Replacement Request. El del Supervisor: Convex lo confirma con el
+    // token de quien llama, así que `SUPERVISOR_EMAILS` no se vuelve a leer
+    // aquí. La lectura de arriba es interna precisamente para que esta
+    // comprobación sea la única puerta.
+    const isOwner = user.clerkId === userId;
+    if (!isOwner && !(await supervisorOrNot(getToken))) {
       return new NextResponse('Unauthorized', { status: 401 });
     }
 
@@ -67,5 +73,20 @@ export async function GET(req: Request) {
   } catch (error) {
     console.error('Error generando PDF al vuelo:', error);
     return new NextResponse(String(error), { status: 500 });
+  }
+}
+
+/**
+ * Si Convex no contesta, quien no es dueño recibe la negativa de siempre: un
+ * 401, no un 500 con el texto del error dentro.
+ */
+async function supervisorOrNot(
+  getToken: Parameters<typeof isSupervisorPerConvex>[0]
+): Promise<boolean> {
+  try {
+    return await isSupervisorPerConvex(getToken);
+  } catch (error) {
+    console.error('No se pudo preguntar a Convex si es Supervisor:', error);
+    return false;
   }
 }
