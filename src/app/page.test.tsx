@@ -19,19 +19,24 @@ import { TOUCH_TARGET } from '@/lib/touch-target';
  * pinta de verdad.
  */
 
-const { useQuery, useConvexAuth, useMutation, abandonConversation, useChat, push } = vi.hoisted(
-  () => {
+const { useQuery, useConvexAuth, useMutation, abandonConversation, ensureCurrent, useChat, push } =
+  vi.hoisted(() => {
     const abandonConversation = vi.fn(async () => null);
+    const ensureCurrent = vi.fn(async () => null);
     return {
       useQuery: vi.fn(),
       useConvexAuth: vi.fn(),
-      useMutation: vi.fn(() => abandonConversation),
+      // Por el nombre y no por la referencia, por lo mismo que las consultas:
+      // `api` fabrica un objeto nuevo en cada acceso.
+      useMutation: vi.fn((reference: Parameters<typeof getFunctionName>[0]) =>
+        getFunctionName(reference) === 'users:ensureCurrent' ? ensureCurrent : abandonConversation
+      ),
       abandonConversation,
+      ensureCurrent,
       useChat: vi.fn(),
       push: vi.fn(),
     };
-  }
-);
+  });
 
 vi.mock('convex/react', () => ({ useQuery, useConvexAuth, useMutation }));
 vi.mock('@ai-sdk/react', () => ({ useChat }));
@@ -368,6 +373,51 @@ describe('la pantalla de chat con credenciales frías', () => {
     const container = await renderScreen({ user: null, conversation: null });
 
     expect(container.querySelector('.animate-pulse')).not.toBeNull();
+  });
+
+  /**
+   * Y la espera ya no depende sólo del webhook (missing-user-row, ticket 01):
+   * si la fila no llega nunca —entrega fallida, o un preview al que el webhook
+   * no apunta— el Customer se quedaba mirándola para siempre. La pantalla pide
+   * su propia fila, y la consulta reactiva la trae en cuanto existe.
+   */
+  test('con la sesión puesta y sin Customer, la pantalla pide su fila', async () => {
+    await renderScreen({ user: null, conversation: null });
+
+    await vi.waitFor(() => expect(ensureCurrent).toHaveBeenCalledTimes(1));
+  });
+
+  test('con el Customer ya puesto no pide nada', async () => {
+    await render('es');
+
+    expect(ensureCurrent).not.toHaveBeenCalled();
+  });
+
+  test('durante el handshake no pide nada: todavía no hay a nombre de quién', async () => {
+    await renderScreen({
+      user: null,
+      conversation: null,
+      auth: authState({ isLoading: true, isAuthenticated: false }),
+    });
+
+    expect(ensureCurrent).not.toHaveBeenCalled();
+  });
+
+  /**
+   * Si pedirla falla, la espera volvería a ser para siempre. El fallo se le
+   * entrega a la frontera, que es la que ya sabe decirlo y ofrecer reintentar.
+   */
+  test('si pedir la fila falla, se dice y se ofrece reintentar', async () => {
+    const consola = vi.spyOn(console, 'error').mockImplementation(() => {});
+    ensureCurrent.mockRejectedValueOnce(new Error('offline'));
+
+    const container = await renderScreen({ user: null, conversation: null });
+
+    const t = messagesFor('es').chat;
+    await vi.waitFor(() => expect(container.textContent).toContain(t.errorTitle));
+    expect(container.textContent).toContain(t.errorRetry);
+
+    consola.mockRestore();
   });
 
   /**

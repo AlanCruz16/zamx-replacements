@@ -96,6 +96,29 @@ function ChatScreen({ onLanguage }: { onLanguage: (language: Language) => void }
   const { isLoading: authLoading, isAuthenticated } = useConvexAuth();
   const router = useRouter();
 
+  /**
+   * Con sesión y sin fila, la pantalla pide la suya (missing-user-row, ticket
+   * 01). El webhook de Clerk era el único que la creaba, y si no llegaba nunca
+   * —entrega fallida, secreto equivocado, un preview al que no apunta— la espera
+   * de abajo no terminaba. La consulta es reactiva: en cuanto la fila existe,
+   * `user` la trae y la pantalla sigue sola.
+   *
+   * Si pedirla falla, el fallo se lanza en el render para que lo recoja la
+   * frontera de error, que ya sabe decirlo y ofrecer reintentar —reintentar
+   * vuelve a montar esto y lo vuelve a pedir—. Callarlo devolvería al Customer
+   * a la misma espera sin salida.
+   */
+  const ensureCurrent = useMutation(api.users.ensureCurrent);
+  const [ensureError, setEnsureError] = useState<unknown>(null);
+  const needsRow = !authLoading && isAuthenticated && user === null;
+  useEffect(() => {
+    if (!needsRow) return;
+    ensureCurrent({}).catch(setEnsureError);
+  }, [needsRow, ensureCurrent]);
+  if (ensureError) {
+    throw ensureError;
+  }
+
   // El idioma que ha de usar la frontera de error si la pantalla se cae. Se le
   // dice en cuanto se sabe, y no cuando ya haga falta: para entonces no habría
   // pantalla a la que preguntárselo. Sólo cuando se sabe de verdad: sin Customer
@@ -126,9 +149,10 @@ function ChatScreen({ onLanguage }: { onLanguage: (language: Language) => void }
     return null;
   }
 
-  // Con sesión pero sin Customer todavía: la fila no ha aterrizado por el
-  // webhook. Es el otro instante frío y también es una espera — antes caía en
-  // la rama de arriba y dejaba al Customer mirando una página en blanco.
+  // Con sesión pero sin Customer todavía: la fila está en camino, por el
+  // webhook o por `ensureCurrent`. Es el otro instante frío y también es una
+  // espera — antes caía en la rama de arriba y dejaba al Customer mirando una
+  // página en blanco.
   if (user === null) {
     return <Loading />;
   }

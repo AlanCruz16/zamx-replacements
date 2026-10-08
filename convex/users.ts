@@ -1,12 +1,31 @@
-import { v } from 'convex/values';
-import { internalMutation, mutation, query } from './_generated/server';
+import { v, type Infer } from 'convex/values';
+import { internalMutation, mutation, query, type MutationCtx } from './_generated/server';
+
+/** Lo que se sabe de un Customer al darlo de alta, venga de donde venga. */
+const newCustomer = v.object({
+  clerkId: v.string(),
+  fullName: v.string(),
+  email: v.string(),
+});
+
+/**
+ * La fila de un Customer recién llegado. Sale de aquí tanto si la trae el
+ * webhook de Clerk como si la pide la propia pantalla (`ensureCurrent`), para
+ * que las dos puertas no acaben creando Customers distintos.
+ *
+ * La empresa queda en «Pendiente», que es lo que manda al onboarding. El idioma
+ * empieza en español porque es ZIEHL-ABEGG México.
+ */
+function insertCustomer(ctx: MutationCtx, customer: Infer<typeof newCustomer>) {
+  return ctx.db.insert('users', {
+    ...customer,
+    companyName: 'Pendiente',
+    preferredLanguage: 'es',
+  });
+}
 
 export const upsertFromClerk = internalMutation({
-  args: {
-    clerkId: v.string(),
-    fullName: v.string(),
-    email: v.string(),
-  },
+  args: newCustomer.fields,
   handler: async (ctx, args) => {
     // Check if user already exists
     const existingUser = await ctx.db
@@ -23,18 +42,7 @@ export const upsertFromClerk = internalMutation({
       return existingUser._id;
     }
 
-    // Insert new user
-    // We default company name to "N/A" for now; the user might update it later in the UI.
-    // We default language to Spanish since it's ZIEHL-ABEGG Mexico.
-    const newUserId = await ctx.db.insert('users', {
-      clerkId: args.clerkId,
-      fullName: args.fullName,
-      email: args.email,
-      companyName: 'Pendiente',
-      preferredLanguage: 'es',
-    });
-
-    return newUserId;
+    return await insertCustomer(ctx, args);
   },
 });
 
@@ -49,6 +57,41 @@ export const current = query({
       .query('users')
       .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
       .unique();
+  },
+});
+
+/**
+ * Que un Customer con sesión tenga su fila aunque el webhook no la haya traído
+ * (missing-user-row, ticket 01).
+ *
+ * El webhook sigue siendo quien la mantiene al día, pero ya no es el único que
+ * la crea: si su entrega falla, si el secreto está mal, o si el despliegue es
+ * un preview al que el webhook no apunta, la pantalla de chat se quedaba
+ * esperando una fila que nunca llegaba. La construye con lo que dice el token
+ * de Clerk, y si la fila ya existe no la toca —lo que el Customer dijo en el
+ * onboarding no lo pisa el token—.
+ */
+export const ensureCurrent = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new Error('Unauthenticated');
+    }
+
+    const existing = await ctx.db
+      .query('users')
+      .withIndex('by_clerk_id', (q) => q.eq('clerkId', identity.subject))
+      .unique();
+    if (existing) {
+      return existing._id;
+    }
+
+    return await insertCustomer(ctx, {
+      clerkId: identity.subject,
+      fullName: identity.name ?? '',
+      email: identity.email ?? '',
+    });
   },
 });
 
