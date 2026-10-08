@@ -10,6 +10,7 @@ import {
   DEFAULT_CUSTOMER_SORT,
   type CustomerSort,
 } from '../../../convex/lib/customer_list';
+import { LinkRow } from './LinkRow';
 import { StackedCell } from './StackedCell';
 import { formatDateTime, SUPERVISOR_MESSAGES } from '@/lib/messages';
 
@@ -143,15 +144,11 @@ export function CustomerList() {
           </thead>
           <tbody className="block md:table-row-group space-y-3 md:space-y-0">
             {customers.map((customer) => (
-              <tr
-                key={customer._id}
-                className="relative block md:table-row rounded-lg border md:border-0 md:border-b border-gray-200 dark:border-gray-800 p-3 md:p-0 hover:bg-gray-50 dark:hover:bg-gray-900/50"
-              >
+              <LinkRow key={customer._id} href={`${PATH}/${customer._id}`}>
                 <StackedCell label={t.customers.columns.name}>
-                  {/* El enlace cubre la fila entera: toda ella abre el detalle. */}
                   <Link
                     href={`${PATH}/${customer._id}`}
-                    className="font-medium text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)] after:absolute after:inset-0"
+                    className="font-medium text-[var(--color-brand-blue)] dark:text-[var(--color-brand-light)]"
                   >
                     {customer.fullName}
                   </Link>
@@ -168,7 +165,7 @@ export function CustomerList() {
                 <StackedCell label={t.customers.columns.latestRequestAt}>
                   {formatDateTime(customer.latestRequestAt, 'es')}
                 </StackedCell>
-              </tr>
+              </LinkRow>
             ))}
           </tbody>
         </table>

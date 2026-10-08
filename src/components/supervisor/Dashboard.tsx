@@ -8,6 +8,7 @@ import { api } from '../../../convex/_generated/api';
 import { AWAITING_REVIEW, OUTCOME_FILTERS } from '../../../convex/lib/outcome';
 import { Card } from './Card';
 import { PeriodPicker } from './PeriodPicker';
+import { LinkRow } from './LinkRow';
 import { StackedCell } from './StackedCell';
 import { WeeklyChart } from './WeeklyChart';
 import { periodBounds, type PeriodPreset } from '@/lib/supervisor-period';
@@ -115,15 +116,14 @@ function Figures({ preset }: { preset: PeriodPreset }) {
             </thead>
             <tbody className="block md:table-row-group space-y-3 md:space-y-0">
               {summary.topCustomers.map((customer) => (
-                <tr
+                <LinkRow
                   key={customer.customerId}
-                  className="relative block md:table-row rounded-lg border md:border-0 md:border-b border-gray-200 dark:border-gray-800 p-3 md:p-0 hover:bg-gray-50 dark:hover:bg-gray-900/50"
+                  href={`/supervisor/customers/${customer.customerId}`}
                 >
                   <StackedCell label={t.dashboard.topColumns.customer}>
-                    {/* El enlace cubre la fila entera: toda ella abre el detalle. */}
                     <Link
                       href={`/supervisor/customers/${customer.customerId}`}
-                      className={`font-medium ${LINK} after:absolute after:inset-0`}
+                      className={`font-medium ${LINK}`}
                     >
                       {customer.fullName}
                     </Link>
@@ -137,7 +137,7 @@ function Figures({ preset }: { preset: PeriodPreset }) {
                   <StackedCell label={t.dashboard.topColumns.units} numeric>
                     {customer.unitCount}
                   </StackedCell>
-                </tr>
+                </LinkRow>
               ))}
             </tbody>
           </table>
