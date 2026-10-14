@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { INTERNAL_PATHS, stubInternalConvex } from '@/test/internal-convex';
-import type { Language } from '@/lib/messages';
+import { ZAMX_TIME_ZONE, type Language } from '@/lib/messages';
 import type { ReactElement } from 'react';
 import type { QuoteDocumentProps } from '@/components/pdf/QuoteDocument';
 import type { Doc } from '../../../convex/_generated/dataModel';
@@ -198,17 +198,20 @@ describe('el Quote Document de las dos rutas', () => {
     expect(desdeElCorreo.language).toBe('en');
     // La fecha se formatea una sola vez, aquí, porque el documento lo genera el
     // servidor: `es-MX` la escribe día/mes y `en-US` mes/día, y el Customer
-    // recibe la suya. Se compara contra el propio locale y no contra una cadena
-    // escrita a mano, que dependería de la zona horaria de quien ejecute esto.
+    // recibe la suya. Se compara contra el propio locale, en la zona de ZAMX
+    // (la del documento, no la de quien ejecute esto).
     const creado = new Date(Date.UTC(2026, 6, 30));
-    expect(desdeElCorreo.date).toBe(creado.toLocaleDateString('en-US'));
-    expect(desdeElCorreo.date).not.toBe(creado.toLocaleDateString('es-MX'));
+    const enLaZonaDeZamx = { timeZone: ZAMX_TIME_ZONE };
+    expect(desdeElCorreo.date).toBe(creado.toLocaleDateString('en-US', enLaZonaDeZamx));
+    expect(desdeElCorreo.date).not.toBe(creado.toLocaleDateString('es-MX', enLaZonaDeZamx));
   });
 
   test('el Customer que no eligió inglés recibe su documento en español', async () => {
     const props = await propsFromEmailRoute();
 
     expect(props.language).toBe('es');
-    expect(props.date).toBe(new Date(Date.UTC(2026, 6, 30)).toLocaleDateString('es-MX'));
+    expect(props.date).toBe(
+      new Date(Date.UTC(2026, 6, 30)).toLocaleDateString('es-MX', { timeZone: ZAMX_TIME_ZONE })
+    );
   });
 });

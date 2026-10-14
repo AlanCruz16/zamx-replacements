@@ -55,12 +55,27 @@ export function localeOf(language: Language): string {
   return LOCALES[language];
 }
 
-/** La fecha corta de una marca de tiempo, en el idioma del Customer. */
+/** La zona de ZIEHL-ABEGG México, que es quien emite el Quote Document. */
+export const ZAMX_TIME_ZONE = 'America/Mexico_City';
+
+/**
+ * La fecha corta de una marca de tiempo, en el idioma del Customer y siempre en
+ * el día de ZAMX, se dibuje donde se dibuje: en el Quote Document y en el alta
+ * del Customer del panel del Supervisor. La zona va fija por el primero, que se
+ * renderiza en el servidor y éste corre en UTC: a partir de las 18:00 en la
+ * Ciudad de México ahí ya es mañana, y el documento salía fechado un día después
+ * de lo que decía «Mis Cotizaciones» (REQ-QFOW6A).
+ */
 export function formatDate(timestamp: number, language: Language): string {
-  return new Date(timestamp).toLocaleDateString(localeOf(language));
+  return new Date(timestamp).toLocaleDateString(localeOf(language), {
+    timeZone: ZAMX_TIME_ZONE,
+  });
 }
 
-/** La fecha con hora que lleva cada Replacement Request en la lista. */
+/**
+ * La fecha con hora que lleva cada Replacement Request en la lista. Ésta sí va
+ * en la zona del navegador: sólo se dibuja ahí, y la lee quien la tiene delante.
+ */
 export function formatDateTime(timestamp: number, language: Language): string {
   return new Date(timestamp).toLocaleDateString(localeOf(language), {
     day: 'numeric',

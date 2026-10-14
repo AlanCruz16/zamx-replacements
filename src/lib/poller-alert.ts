@@ -1,4 +1,5 @@
 import type { PollerFailure } from '../../convex/lib/poller_health';
+import { ZAMX_TIME_ZONE } from './messages';
 
 /**
  * Qué se le dice a quien tiene que arreglar un sondeo que no abre el buzón.
@@ -25,7 +26,7 @@ function stamp(at: number): string {
   return new Intl.DateTimeFormat('es-MX', {
     dateStyle: 'medium',
     timeStyle: 'short',
-    timeZone: 'America/Mexico_City',
+    timeZone: ZAMX_TIME_ZONE,
   }).format(new Date(at));
 }
 
