@@ -50,10 +50,17 @@ const interpretationSchema = z.object({
     .array(z.object({ partNumber: z.string(), price: z.number() }))
     .optional()
     .describe('Lista de nuevos precios en USD si el empleado los modificó.'),
+  // Un rango y no una cifra: la Delivery Estimate es un mínimo y un máximo, y
+  // con un solo número el modelo tenía que escoger un extremo de «18 a 22».
   newDeliveryWeeks: z
-    .number()
+    .object({
+      min: z.number().describe('Semanas enteras del extremo menor del plazo.'),
+      max: z.number().describe('Semanas enteras del extremo mayor del plazo.'),
+    })
     .optional()
-    .describe('Nuevo tiempo de entrega en semanas enteras si el empleado lo modificó.'),
+    .describe(
+      'Nuevo tiempo de entrega en semanas enteras si el empleado lo modificó. «18 a 22 semanas» => { min: 18, max: 22 }; una sola cifra, «20 semanas» => { min: 20, max: 20 }.'
+    ),
 });
 
 /**
@@ -80,6 +87,8 @@ Replacement Request:
 ${vocabularyPromptBlock()}
 
 Extrae precios y plazos sólo si el Approver los mencionó explícitamente.
+El plazo es un rango de semanas enteras con "min" y "max": "de 18 a 22 semanas" da min 18 y max 22,
+y una sola cifra como "20 semanas" da min 20 y max 20. Nunca escojas un solo extremo de un rango.
 Si la intención no es clara, "confidence" debe ser menor a ${CONFIDENCE_THRESHOLD}.
 `;
 }

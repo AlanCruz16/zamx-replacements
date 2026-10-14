@@ -1,5 +1,5 @@
 import type { Outcome } from '../../convex/lib/outcome';
-import type { ReplyReason, UnappliedPrice } from '../../convex/lib/reply_verdict';
+import type { DeliveryWeeks, ReplyReason, UnappliedPrice } from '../../convex/lib/reply_verdict';
 import { usd } from './money';
 
 /**
@@ -26,6 +26,8 @@ export type ApproverReplyPayload = {
   prices?: UnappliedPrice[];
   /** Las piezas que se quedarían sin Confirmed Price con la decisión leída. */
   partsWithoutPrice?: string[];
+  /** El plazo que se leyó y no se aplicó, aunque el motivo principal sea otro. */
+  deliveryWeeks?: DeliveryWeeks;
   /** Sólo con `already_settled`: el Outcome que ya tenía la Request. */
   outcome?: Outcome;
 };
@@ -111,6 +113,22 @@ function unknownPartBlock(prices: UnappliedPrice[]): string[] {
   ];
 }
 
+/** Un plazo que no es un rango de semanas enteras. */
+function deliveryBlock(weeks: DeliveryWeeks | undefined): string[] {
+  return [
+    '',
+    ...(weeks === undefined
+      ? []
+      : [
+          `Tiempo de entrega que se leyó: ${weeks.min === weeks.max ? weeks.min : `${weeks.min} a ${weeks.max}`} semanas.`,
+          '',
+        ]),
+    'El tiempo de entrega va en semanas enteras, como un rango de mínimo a máximo',
+    '(por ejemplo, «18 a 22 semanas») o una sola cifra (por ejemplo, «20 semanas»).',
+    'Conteste con el plazo escrito así.',
+  ];
+}
+
 function bodyFor(payload: ApproverReplyPayload, prices: UnappliedPrice[]): string[] {
   switch (payload.reason) {
     case 'low_confidence':
@@ -138,6 +156,10 @@ function bodyFor(payload: ApproverReplyPayload, prices: UnappliedPrice[]): strin
         ...outOfBandBlock(prices.filter((p) => p.suggestedPriceUSD !== undefined)),
         ...unknownPartBlock(prices.filter((p) => p.suggestedPriceUSD === undefined)),
         ...missingPriceBlock(payload.partsWithoutPrice ?? []),
+        // El veredicto nombra un solo motivo, y el de precio va antes: sin este
+        // bloque el Approver corregiría el precio y sólo entonces se enteraría
+        // de que el plazo tampoco se pudo aplicar.
+        ...(payload.deliveryWeeks === undefined ? [] : deliveryBlock(payload.deliveryWeeks)),
       ];
 
     case 'price_missing':
@@ -145,6 +167,14 @@ function bodyFor(payload: ApproverReplyPayload, prices: UnappliedPrice[]): strin
         'Su decisión no se ha registrado: faltan precios, y la solicitud sigue en revisión',
         'hasta que los indique. Al cliente no se le ha enviado nada.',
         ...missingPriceBlock(payload.partsWithoutPrice ?? []),
+      ];
+
+    case 'delivery_invalid':
+      return [
+        'Su decisión no se ha registrado: el tiempo de entrega no se pudo aplicar, y la',
+        'solicitud sigue en revisión hasta que lo confirme. Al cliente no se le ha',
+        'enviado nada.',
+        ...deliveryBlock(payload.deliveryWeeks),
       ];
 
     case 'already_settled':

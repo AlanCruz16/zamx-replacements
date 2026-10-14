@@ -104,3 +104,31 @@ describe('el cuerpo del correo viaja como mensaje de usuario', () => {
     });
   });
 });
+
+describe('el plazo de entrega se lee como rango', () => {
+  test('el esquema pide un mínimo y un máximo, no una sola cifra', async () => {
+    // «de 18 a 22 semanas» con un solo número dejaba al modelo escoger uno, y el
+    // Quote Document acababa diciendo «22 a 22 semanas».
+    generateObject.mockResolvedValue({
+      object: { classification: 'priced_differently', confidence: 0.9, explanation: 'Plazo.' },
+    });
+
+    await interpretApproverReply(REQUEST, 'Entrega de 18 a 22 semanas');
+
+    const [{ schema }] = generateObject.mock.calls[0];
+    const base = { classification: 'priced_differently', confidence: 0.9, explanation: 'Plazo.' };
+
+    expect(schema.safeParse({ ...base, newDeliveryWeeks: { min: 18, max: 22 } }).success).toBe(
+      true
+    );
+    expect(schema.safeParse({ ...base, newDeliveryWeeks: 22 }).success).toBe(false);
+  });
+
+  test('el prompt de sistema dice que una sola cifra es un rango con los dos extremos iguales', () => {
+    const system = interpreterSystemPrompt(REQUEST);
+
+    expect(system).toMatch(/18 a 22 semanas/);
+    expect(system).toMatch(/20 semanas/);
+    expect(system).toMatch(/min.*max/);
+  });
+});

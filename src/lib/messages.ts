@@ -105,6 +105,15 @@ export function formatAmount(valueUSD: number, language: Language): string {
   });
 }
 
+/**
+ * Una Delivery Estimate dicha en palabras. Una sola cifra es un rango con los
+ * dos extremos iguales y se dice una vez: «22 a 22 semanas» no es un plazo que
+ * nadie escriba.
+ */
+function weekSpan(min: number, max: number, to: string): string {
+  return min === max ? `${min}` : `${min} ${to} ${max}`;
+}
+
 const es = {
   /** La pantalla de chat: `src/app/page.tsx` y los componentes de `chat/`. */
   chat: {
@@ -255,9 +264,10 @@ const es = {
     colUnitPrice: 'precio/pza.',
     colTotal: 'Total',
     unit: 'pza',
-    deliveryShared: (min: number, max: number) => `Tiempo de entrega: ${min} a ${max} semanas`,
+    deliveryShared: (min: number, max: number) =>
+      `Tiempo de entrega: ${weekSpan(min, max, 'a')} semanas`,
     deliveryPerPart: (partNumber: string, min: number, max: number) =>
-      `Tiempo de entrega ${partNumber}: ${min} a ${max} semanas`,
+      `Tiempo de entrega ${partNumber}: ${weekSpan(min, max, 'a')} semanas`,
     totalsProducts: 'Monto de productos',
     totalsTax: 'IVA (16%)',
     totalsSum: 'Suma total',
@@ -439,9 +449,10 @@ const en: Messages = {
     colUnitPrice: 'price/pc.',
     colTotal: 'Total',
     unit: 'pcs',
-    deliveryShared: (min: number, max: number) => `Delivery time: ${min} to ${max} weeks`,
+    deliveryShared: (min: number, max: number) =>
+      `Delivery time: ${weekSpan(min, max, 'to')} weeks`,
     deliveryPerPart: (partNumber: string, min: number, max: number) =>
-      `Delivery time ${partNumber}: ${min} to ${max} weeks`,
+      `Delivery time ${partNumber}: ${weekSpan(min, max, 'to')} weeks`,
     totalsProducts: 'Products amount',
     totalsTax: 'VAT (16%)',
     totalsSum: 'Grand total',

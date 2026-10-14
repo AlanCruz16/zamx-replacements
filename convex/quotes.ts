@@ -170,7 +170,8 @@ export const processEmployeeResponse = internalMutation({
         })
       )
     ),
-    newDeliveryWeeks: v.optional(v.number()),
+    /** Ya validada por el veredicto: semanas enteras, mínimo no mayor que máximo. */
+    newDeliveryWeeks: v.optional(v.object({ min: v.number(), max: v.number() })),
   },
   handler: async (ctx, args): Promise<OutcomeTransition> => {
     // 1. Find the quote by requestId using index
@@ -225,7 +226,7 @@ export const processEmployeeResponse = internalMutation({
         const confirmedDelivery =
           newDeliveryWeeks === undefined
             ? { min: p.suggestedDeliveryWeeksMin, max: p.suggestedDeliveryWeeksMax }
-            : { min: newDeliveryWeeks, max: newDeliveryWeeks };
+            : newDeliveryWeeks;
 
         return {
           ...p,

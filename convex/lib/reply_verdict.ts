@@ -32,8 +32,15 @@ export type ReplyInterpretation = {
   confidence: number;
   explanation: string;
   newPricesUSD?: { partNumber: string; price: number }[];
-  newDeliveryWeeks?: number;
+  /** Tal cual lo devuelve el modelo: puede no ser un rango válido. */
+  newDeliveryWeeks?: DeliveryWeeks;
 };
+
+/**
+ * Una Delivery Estimate: un rango de semanas enteras. Una sola cifra en la
+ * respuesta («20 semanas») es el caso en que el mínimo y el máximo coinciden.
+ */
+export type DeliveryWeeks = { min: number; max: number };
 
 /** Lo único que hace falta de la Replacement Request para juzgar la respuesta. */
 export type RequestUnderReview = {
@@ -65,7 +72,8 @@ export type ReplyReason =
   | 'low_confidence'
   | 'price_out_of_bounds'
   | 'price_for_unknown_part'
-  | 'price_missing';
+  | 'price_missing'
+  | 'delivery_invalid';
 
 export type Verdict = {
   screening: Screening;
@@ -76,7 +84,10 @@ export type Verdict = {
   explanation: string;
   /** Vacío salvo que el Outcome sea `priced_differently`. */
   prices: PriceDecision[];
-  deliveryWeeks?: number;
+  /** Sólo con `priced_differently`, y sólo si es un rango válido. */
+  deliveryWeeks?: DeliveryWeeks;
+  /** El plazo que se leyó y no se aplicó. Presente sólo con `delivery_invalid`. */
+  invalidDeliveryWeeks?: DeliveryWeeks;
   replyToApprover?: ReplyReason;
   /**
    * Las piezas que se quedarían sin Confirmed Price si el Outcome con precio se
@@ -212,13 +223,23 @@ export function verdictForReply(input: {
         .map((product) => product.partNumber)
     : [];
 
+  // Sólo `priced_differently` trae plazo, igual que los precios. Uno que no es
+  // un rango de semanas enteras no se aplica, y tampoco se descarta en silencio:
+  // el Quote Document volvería a la Delivery Estimate sugerida, que no es la que
+  // dio el Approver.
+  const newDelivery =
+    classification === 'priced_differently' ? interpretation.newDeliveryWeeks : undefined;
+  const deliveryValid = newDelivery === undefined || isValidDeliveryWeeks(newDelivery);
+
   const replyToApprover = prices.some((p) => p.status === 'out_of_bounds')
     ? ('price_out_of_bounds' as const)
     : prices.some((p) => p.status === 'unknown_part')
       ? ('price_for_unknown_part' as const)
       : partsWithoutPrice.length > 0
         ? ('price_missing' as const)
-        : undefined;
+        : !deliveryValid
+          ? ('delivery_invalid' as const)
+          : undefined;
 
   // Con un precio sin aplicar no hay Outcome: la Replacement Request se queda en
   // revisión hasta que el Approver confirme la cifra.
@@ -236,9 +257,10 @@ export function verdictForReply(input: {
     confidence,
     explanation: interpretation.explanation,
     prices,
-    ...(outcome === 'priced_differently' && interpretation.newDeliveryWeeks !== undefined
-      ? { deliveryWeeks: interpretation.newDeliveryWeeks }
+    ...(outcome === 'priced_differently' && newDelivery !== undefined
+      ? { deliveryWeeks: newDelivery }
       : {}),
+    ...(newDelivery !== undefined && !deliveryValid ? { invalidDeliveryWeeks: newDelivery } : {}),
     ...(replyToApprover === undefined ? {} : { replyToApprover }),
     ...(partsWithoutPrice.length === 0 ? {} : { partsWithoutPrice }),
   };
@@ -279,6 +301,11 @@ export function unappliedPrices(verdict: Verdict): UnappliedPrice[] {
       priceUSD: p.priceUSD,
       ...(p.status === 'out_of_bounds' ? { suggestedPriceUSD: p.suggestedPriceUSD } : {}),
     }));
+}
+
+/** Semanas enteras, mayores que cero, con el mínimo no mayor que el máximo. */
+function isValidDeliveryWeeks({ min, max }: DeliveryWeeks): boolean {
+  return Number.isInteger(min) && Number.isInteger(max) && min > 0 && min <= max;
 }
 
 /** Un modelo que devuelve 1.5 o -2 no ensancha ni estrecha el umbral. */

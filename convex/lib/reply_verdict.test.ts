@@ -304,7 +304,7 @@ describe('un precio extraído se acota contra el Suggested Price', () => {
       interpretation: {
         classification: 'priced_as_suggested',
         newPricesUSD: [{ partNumber: 'P-001', price: 9999 }],
-        newDeliveryWeeks: 4,
+        newDeliveryWeeks: { min: 4, max: 4 },
       },
     });
 
@@ -314,10 +314,59 @@ describe('un precio extraído se acota contra el Suggested Price', () => {
 
   test('un plazo de entrega nuevo viaja con el Outcome que lo admite', () => {
     const v = verdict({
-      interpretation: { classification: 'priced_differently', newDeliveryWeeks: 12 },
+      interpretation: {
+        classification: 'priced_differently',
+        newDeliveryWeeks: { min: 12, max: 12 },
+      },
     });
 
-    expect(v.deliveryWeeks).toBe(12);
+    expect(v.deliveryWeeks).toEqual({ min: 12, max: 12 });
+  });
+
+  test('un plazo dado como rango conserva los dos extremos', () => {
+    // «entrega de 18 a 22 semanas»: antes viajaba una sola cifra y el Quote
+    // Document decía «22 a 22 semanas». El 18 es parte de la decisión.
+    const v = verdict({
+      interpretation: {
+        classification: 'priced_differently',
+        newDeliveryWeeks: { min: 18, max: 22 },
+      },
+    });
+
+    expect(v.outcome).toBe('priced_differently');
+    expect(v.deliveryWeeks).toEqual({ min: 18, max: 22 });
+    expect(v.replyToApprover).toBeUndefined();
+  });
+
+  test.each([
+    ['un mínimo mayor que el máximo', { min: 22, max: 18 }],
+    ['semanas fraccionarias', { min: 18.5, max: 22 }],
+    ['un plazo de cero semanas', { min: 0, max: 4 }],
+    ['un plazo negativo', { min: -2, max: 4 }],
+  ])('un plazo con %s no se aplica y se le contesta al Approver', (_, weeks) => {
+    // El mismo trato que un precio fuera de banda: aplicar el resto y callar el
+    // plazo dejaría el Quote Document con la Delivery Estimate sugerida, que el
+    // Approver no dio.
+    const v = verdict({
+      interpretation: { classification: 'priced_differently', newDeliveryWeeks: weeks },
+    });
+
+    expect(v.outcome).toBeUndefined();
+    expect(v.deliveryWeeks).toBeUndefined();
+    expect(v.replyToApprover).toBe('delivery_invalid');
+    expect(v.invalidDeliveryWeeks).toEqual(weeks);
+  });
+
+  test('un plazo inválido en una aprobación sin cambios no detiene nada: se ignora', () => {
+    const v = verdict({
+      interpretation: {
+        classification: 'priced_as_suggested',
+        newDeliveryWeeks: { min: 22, max: 18 },
+      },
+    });
+
+    expect(v.outcome).toBe('priced_as_suggested');
+    expect(v.replyToApprover).toBeUndefined();
   });
 });
 

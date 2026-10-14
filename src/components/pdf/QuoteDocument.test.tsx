@@ -158,4 +158,38 @@ describe('el Quote Document', () => {
       expect(text).not.toContain(t.deliveryPerPart('P-001', 25, 30));
     }
   });
+
+  test.each([
+    ['es', 'Tiempo de entrega: 22 semanas'],
+    ['en', 'Delivery time: 22 weeks'],
+  ] as const)(
+    'en %s, un plazo de una sola cifra se dice una vez y no como «22 a 22»',
+    (language, expected) => {
+      const unaCifra = PROPS.products.map((p) => ({
+        ...p,
+        deliveryWeeksMin: 22,
+        deliveryWeeksMax: 22,
+      }));
+
+      const text = documentText(language, { products: unaCifra });
+
+      expect(text).toContain(expected);
+      expect(text).not.toMatch(/22 (a|to) 22/);
+    }
+  );
+
+  test.each([
+    ['es', 'Tiempo de entrega P-001: 22 semanas'],
+    ['en', 'Delivery time P-001: 22 weeks'],
+  ] as const)('en %s, también por pieza', (language, expected) => {
+    const porPieza = [
+      { ...PROPS.products[0], deliveryWeeksMin: 22, deliveryWeeksMax: 22 },
+      ...PROPS.products.slice(1),
+    ];
+
+    const text = documentText(language, { products: porPieza });
+
+    expect(text).toContain(expected);
+    expect(text).not.toMatch(/22 (a|to) 22/);
+  });
 });

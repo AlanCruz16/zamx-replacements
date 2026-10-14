@@ -157,3 +157,47 @@ describe('una pieza que se quedaría sin precio', () => {
     expect(ambos).toContain('  · P-002');
   });
 });
+
+describe('un plazo de entrega que no es un rango de semanas enteras', () => {
+  const { text } = composeApproverReply({
+    requestId: 'REQ-ABC123',
+    reason: 'delivery_invalid',
+    deliveryWeeks: { min: 22, max: 18 },
+  });
+
+  test('dice qué plazo se leyó y que no se registró la decisión', () => {
+    expect(text).toContain('22 a 18 semanas');
+    expect(text).toContain('no se ha registrado');
+    expect(text).toContain('sigue en revisión');
+  });
+
+  test('dice cómo escribirlo para que sí se aplique', () => {
+    expect(text).toContain('semanas enteras');
+    expect(text).toMatch(/18 a 22 semanas|mínimo.*máximo/);
+  });
+});
+
+describe('un plazo inválido junto a un precio fuera de banda', () => {
+  test('el correo del precio también dice que el plazo no se aplicó', () => {
+    const { text } = composeApproverReply({
+      requestId: 'REQ-ABC123',
+      reason: 'price_out_of_bounds',
+      prices: [{ partNumber: 'P-001', priceUSD: 17_000, suggestedPriceUSD: 1000 }],
+      deliveryWeeks: { min: 22, max: 18 },
+    });
+
+    expect(text).toContain('$17,000.00 USD');
+    expect(text).toContain('22 a 18 semanas');
+  });
+
+  test('una sola cifra leída se dice una vez, no «0 a 0»', () => {
+    const { text } = composeApproverReply({
+      requestId: 'REQ-ABC123',
+      reason: 'delivery_invalid',
+      deliveryWeeks: { min: 0, max: 0 },
+    });
+
+    expect(text).toContain('se leyó: 0 semanas');
+    expect(text).not.toContain('0 a 0');
+  });
+});

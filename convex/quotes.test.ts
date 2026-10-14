@@ -496,7 +496,7 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
       outcome: 'priced_as_suggested',
       explanation: 'Todo correcto.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 9999 }],
-      newDeliveryWeeks: 4,
+      newDeliveryWeeks: { min: 4, max: 4 },
     });
 
     // "Priced as suggested" tiene que significar exactamente eso: si el registro
@@ -507,6 +507,42 @@ describe('el Confirmed Price no toca el Suggested Price', () => {
     expect(stored!.products[0].confirmedDeliveryWeeksMin).toBe(
       stored!.products[0].suggestedDeliveryWeeksMin
     );
+  });
+
+  test('un plazo dado como rango se guarda con sus dos extremos', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_differently',
+      explanation: 'Va en 2290 y entrega de 18 a 22 semanas.',
+      newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 2290 }],
+      newDeliveryWeeks: { min: 18, max: 22 },
+    });
+
+    // Antes se guardaba { min: 22, max: 22 } y el Quote Document perdía el 18.
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.products[0].confirmedDeliveryWeeksMin).toBe(18);
+    expect(stored!.products[0].confirmedDeliveryWeeksMax).toBe(22);
+  });
+
+  test('una sola cifra de plazo se guarda con el mínimo igual al máximo', async () => {
+    const t = convexTest(schema, modules);
+    const clerkId = await seed(t);
+    const creada = await createQuote(t, clerkId);
+
+    await t.mutation(internal.quotes.processEmployeeResponse, {
+      requestId: creada.requestId,
+      outcome: 'priced_differently',
+      explanation: 'Mismos precios, entrega: 20 semanas.',
+      newDeliveryWeeks: { min: 20, max: 20 },
+    });
+
+    const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));
+    expect(stored!.products[0].confirmedDeliveryWeeksMin).toBe(20);
+    expect(stored!.products[0].confirmedDeliveryWeeksMax).toBe(20);
   });
 
   test('una pieza sin Suggested Price no gana un cero al aprobarse en bloque', async () => {
@@ -636,7 +672,7 @@ describe('llegar a un Outcome es una transición atómica', () => {
       outcome: 'priced_differently',
       explanation: 'Va en 5555.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 5555 }],
-      newDeliveryWeeks: 12,
+      newDeliveryWeeks: { min: 12, max: 12 },
     });
 
     await t.mutation(internal.quotes.processEmployeeResponse, {
@@ -644,7 +680,7 @@ describe('llegar a un Outcome es una transición atómica', () => {
       outcome: 'priced_differently',
       explanation: 'Mejor en 9999.',
       newPricesUSD: [{ partNumber: PRODUCT.partNumber, price: 9999 }],
-      newDeliveryWeeks: 40,
+      newDeliveryWeeks: { min: 40, max: 40 },
     });
 
     const stored = await t.run(async (ctx) => ctx.db.get(creada.quoteId));

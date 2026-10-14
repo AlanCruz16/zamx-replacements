@@ -401,7 +401,8 @@ export const checkInbox = internalAction({
           }
 
           // Confianza baja, un precio fuera de banda, un precio para una pieza
-          // ajena a la Request o una pieza que se quedaría sin precio. En todos el veredicto se quedó sin
+          // ajena a la Request, una pieza que se quedaría sin precio o un plazo
+          // que no es un rango de semanas enteras. En todos el veredicto se quedó sin
           // Outcome, así que la Request sigue en revisión y lo que falta es
           // decirle al Approver qué no se pudo aplicar.
           if (verdict.replyToApprover !== undefined) {
@@ -412,6 +413,9 @@ export const checkInbox = internalAction({
               ...(verdict.partsWithoutPrice === undefined
                 ? {}
                 : { partsWithoutPrice: verdict.partsWithoutPrice }),
+              ...(verdict.invalidDeliveryWeeks === undefined
+                ? {}
+                : { deliveryWeeks: verdict.invalidDeliveryWeeks }),
             });
           }
 

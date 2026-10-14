@@ -111,7 +111,16 @@ describe('lo que separa un cambio de precio de una aprobación', () => {
     const result = await throttled(() => interpretApproverReply(REQUEST, 'Entrega: 20 semanas'));
 
     expect(result.classification).toBe('priced_differently');
-    expect(result.newDeliveryWeeks).toBe(20);
+    expect(result.newDeliveryWeeks).toEqual({ min: 20, max: 20 });
+  }, 120_000);
+
+  test('un plazo dado como rango conserva los dos extremos', async () => {
+    const result = await throttled(() =>
+      interpretApproverReply(REQUEST, 'Va, mismos precios y entrega de 18 a 22 semanas')
+    );
+
+    expect(result.classification).toBe('priced_differently');
+    expect(result.newDeliveryWeeks).toEqual({ min: 18, max: 22 });
   }, 120_000);
 });
 
