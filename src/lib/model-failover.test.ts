@@ -409,15 +409,16 @@ test('Groq contesta con el razonamiento oculto', async () => {
   expect(call.providerOptions?.groq).toMatchObject({ reasoningFormat: 'hidden' });
 });
 
-test('a Groq se le pide el esquema sin modo estricto, y su respuesta se valida igual', async () => {
-  // El modo estricto de Groq exige todas las propiedades en `required`, y el
-  // esquema del intérprete tiene dos opcionales: con él, Groq rechaza la
-  // petición con un 400. La validación contra el esquema la sigue haciendo el SDK.
+test('a Groq se le pide JSON sin esquema, y su respuesta se valida igual', async () => {
+  // Con el esquema, Groq lo rechaza en modo estricto (dos propiedades
+  // opcionales) y en el no estricto nunca llena `newDeliveryWeeks`. En modo
+  // JSON acierta. La validación contra el esquema la sigue haciendo el SDK.
+  const gemini = failing('google', apiError(503));
   const groq = new MockLanguageModelV3({
     provider: 'groq',
     doGenerate: async () => objectResult({ answer: 7 }),
   });
-  install(failing('google', apiError(503)), groq);
+  install(gemini, groq);
   const createFailoverModel = await loadFactory();
 
   const failure = await generateObject({
@@ -427,12 +428,64 @@ test('a Groq se le pide el esquema sin modo estricto, y su respuesta se valida i
     prompt: 'x',
   }).catch((e: unknown) => e);
 
-  const [call] = groq.doGenerateCalls as LanguageModelV3CallOptions[];
-  expect(call.providerOptions?.groq).toMatchObject({
-    strictJsonSchema: false,
-    reasoningFormat: 'hidden',
-  });
+  const [groqCall] = groq.doGenerateCalls as LanguageModelV3CallOptions[];
+  const [geminiCall] = gemini.doGenerateCalls as LanguageModelV3CallOptions[];
+  expect(groqCall.responseFormat).toEqual({ type: 'json' });
+  expect(geminiCall.responseFormat).toMatchObject({ type: 'json', schema: expect.any(Object) });
   expect(NoObjectGeneratedError.isInstance(failure)).toBe(true);
+});
+
+describe('una regla sólo para Groq', () => {
+  /** El sistema que recibió un proveedor, tal cual. */
+  function systemOf(model: Mock) {
+    const [call] = model.doGenerateCalls as LanguageModelV3CallOptions[];
+    return call.prompt.filter((m) => m.role === 'system').map((m) => m.content);
+  }
+
+  test('Groq la recibe al final de su prompt de sistema', async () => {
+    const groq = answering('groq', 'Groq');
+    install(failing('google', apiError(503)), groq);
+    const createFailoverModel = await loadFactory();
+
+    await generateObject({
+      model: createFailoverModel({ groqRule: 'Regla de Groq.' }),
+      schema,
+      system: 'Sistema.',
+      prompt: 'x',
+    });
+
+    expect(systemOf(groq)).toEqual(['Sistema.\n\nRegla de Groq.']);
+  });
+
+  test('Gemini recibe su prompt de sistema byte por byte', async () => {
+    const gemini = answering('google', 'Gemini');
+    install(gemini, answering('groq', 'Groq'));
+    const createFailoverModel = await loadFactory();
+
+    await generateObject({
+      model: createFailoverModel({ groqRule: 'Regla de Groq.' }),
+      schema,
+      system: 'Sistema.',
+      prompt: 'x',
+    });
+
+    expect(systemOf(gemini)).toEqual(['Sistema.']);
+  });
+
+  test('sin regla, Groq recibe el mismo sistema que Gemini (el chat)', async () => {
+    const groq = answering('groq', 'Groq');
+    install(failing('google', apiError(503)), groq);
+    const createFailoverModel = await loadFactory();
+
+    await generateObject({
+      model: createFailoverModel(),
+      schema,
+      system: 'Sistema.',
+      prompt: 'x',
+    });
+
+    expect(systemOf(groq)).toEqual(['Sistema.']);
+  });
 });
 
 describe('AI_PROVIDER_ORDER', () => {

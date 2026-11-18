@@ -53,19 +53,24 @@ is a failover, not a replacement"). This decision follows that precedent, includ
 
 ### Results
 
-- **Groq's structured output runs non-strict** (decided 2026-11-18). Groq's strict JSON-schema
-  mode requires every property in `required`, and the interpreter's schema has two optional
-  ones (`newPricesUSD`, `newDeliveryWeeks`), so strict Groq answers every interpretation with a 400. The failover module sends `strictJsonSchema: false` on Groq's calls only; Gemini's schema
-  and prompt are unchanged, and the AI SDK still validates every Groq answer against the same
-  Zod schema (a mismatch throws and the email stays unread).
-- **Vocabulary check, 2026-11-18** (`npm run check:vocabulary`, one run per provider):
+- **Groq is asked for plain JSON, not for the schema** (decided 2026-11-18). With the schema,
+  Groq fails both ways: strict mode rejects the interpreter's schema (it has two optional
+  properties, and strict requires all of them in `required`), and non-strict mode never fills
+  `newDeliveryWeeks`, whatever the prompt says. In JSON mode it does. The failover module drops
+  the schema from Groq's calls only; Gemini still receives it. The AI SDK still validates every
+  Groq answer against the same Zod schema (a mismatch throws and the email stays unread).
+- **Groq has its own rule, `GROQ_INTERPRETER_RULE`** (`src/lib/gemini-parser.ts`), appended to
+  Groq's system prompt only. It names the keys (Groq no longer sees the schema), requires
+  `newDeliveryWeeks` whenever a delivery time is given (even with «mismos precios»), forbids
+  copying the Suggested Prices into `newPricesUSD`, and says to omit, never `null`, the optional
+  keys that do not apply. Each of those lines fixed a failure seen in the check.
+- **Vocabulary check, 2026-11-18** (`npm run check:vocabulary`, Groq spaced 30 s apart):
   - `gemini-3.5-flash-lite`: **16/16.**
-  - `qwen/qwen3.8-27b`: **15/16. Fails the gate.** It classifies «Va, mismos precios y entrega
-    de 18 a 22 semanas» as `priced_differently` but returns no `newDeliveryWeeks`, reproducibly.
-    Every vocabulary word passes. (Run with calls 9 s apart; two cases lost to Groq's
-    output-token cap passed when re-run alone. The check now spaces Groq 30 s apart, which has
-    not had a full run yet.) The interpreter stays on Gemini alone until this is resolved;
-    the next step, a Groq-only prompt rule, is the owner's decision.
+  - `qwen/qwen3.8-27b` with the rule: **15/16, and 15/15 of the replies it answered.** The one
+    failure («Ok») never reached the model: Groq refused it for reserving 2,048 output tokens,
+    more than the 1,000-a-minute cap (see Consequences). Before the rule it was 15/16 on a real
+    misreading (the «18 a 22 semanas» range dropped).
+  - Whether a refusal by quota counts against the gate is the owner's call before ticket 04.
 
 ## Consequences
 

@@ -1,7 +1,11 @@
 import { google } from '@ai-sdk/google';
 import { createGroq } from '@ai-sdk/groq';
 import { APICallError } from '@ai-sdk/provider';
-import type { LanguageModelV3, LanguageModelV3CallOptions } from '@ai-sdk/provider';
+import type {
+  LanguageModelV3,
+  LanguageModelV3CallOptions,
+  LanguageModelV3Prompt,
+} from '@ai-sdk/provider';
 
 /**
  * Gemini contesta primero; Groq contesta sólo cuando Gemini falla por algo que
@@ -136,26 +140,55 @@ function asNonRetryable(error: unknown): unknown {
  * Lo que Groq necesita y Gemini no, sin tocar lo que recibe Gemini:
  *
  * - **Razonamiento oculto**: nada de él llega al transcript del Customer.
- * - **Esquema sin modo estricto**: el estricto de Groq exige todas las
- *   propiedades en `required`, y el esquema del intérprete tiene dos opcionales
- *   (`newPricesUSD`, `newDeliveryWeeks`); con él, Groq contesta 400. La
- *   respuesta la sigue validando el SDK contra el mismo esquema, así que nada
- *   del veredicto se afloja: lo que no cuadra lanza y el correo queda sin leer.
+ * - **JSON sin esquema**: con el esquema, Groq lo rechaza en modo estricto (el
+ *   del intérprete tiene dos propiedades opcionales, y el estricto las exige
+ *   todas en `required`) y en el no estricto nunca llena `newDeliveryWeeks`
+ *   (medido el 2026-11-18). En modo JSON acierta, así que las claves se las
+ *   dice la regla de quien llama. La respuesta la sigue validando el SDK contra
+ *   el mismo esquema: nada del veredicto se afloja, y lo que no cuadra lanza y
+ *   el correo queda sin leer.
+ * - **Su regla, si quien llama trae una**: va al final del prompt de sistema,
+ *   y sólo en la llamada a Groq. Gemini lo recibe byte por byte (ADR-0003).
  */
-function optionsFor(name: ProviderName, options: LanguageModelV3CallOptions) {
+function optionsFor(
+  name: ProviderName,
+  options: LanguageModelV3CallOptions,
+  groqRule: string | undefined
+) {
   if (name !== 'groq') return options;
   return {
     ...options,
+    prompt: groqRule === undefined ? options.prompt : withRule(options.prompt, groqRule),
+    responseFormat:
+      options.responseFormat?.type === 'json' ? { type: 'json' as const } : options.responseFormat,
     providerOptions: {
       ...options.providerOptions,
       groq: {
         ...options.providerOptions?.groq,
         reasoningFormat: 'hidden',
-        strictJsonSchema: false,
       },
     },
   };
 }
+
+/** La regla al final del último mensaje de sistema, o como uno nuevo si no hay. */
+function withRule(prompt: LanguageModelV3Prompt, rule: string): LanguageModelV3Prompt {
+  const last = prompt.findLastIndex((message) => message.role === 'system');
+  if (last === -1) return [{ role: 'system', content: rule }, ...prompt];
+  return prompt.map((message, index) =>
+    index === last && message.role === 'system'
+      ? { ...message, content: `${message.content}\n\n${rule}` }
+      : message
+  );
+}
+
+export type FailoverOptions = {
+  /**
+   * Un arreglo de prompt que sólo Groq necesita, medido con
+   * `check:vocabulary`. Lo pasa el intérprete; el chat no tiene ninguno.
+   */
+  groqRule?: string;
+};
 
 function wait(ms: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve) => {
@@ -172,7 +205,7 @@ function wait(ms: number, signal: AbortSignal | undefined): Promise<void> {
  * chat, nunca se comparte entre peticiones. (El intérprete de respuestas del
  * Approver sigue en Gemini solo hasta que Groq pase `check:vocabulary`: ticket 04.)
  */
-export function createFailoverModel(): LanguageModelV3 {
+export function createFailoverModel({ groqRule }: FailoverOptions = {}): LanguageModelV3 {
   const providers = candidates();
   const missingGroqKey = groqKey() === undefined;
   let current = 0;
@@ -188,7 +221,7 @@ export function createFailoverModel(): LanguageModelV3 {
 
       for (let tries = 1; ; tries++) {
         try {
-          return await call(model, optionsFor(name, options));
+          return await call(model, optionsFor(name, options, groqRule));
         } catch (error) {
           lastError = error;
           reason = switchReason(error);

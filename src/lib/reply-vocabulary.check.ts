@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'vitest';
 import { CONFIDENCE_THRESHOLD } from '../../convex/lib/reply_verdict';
-import { interpretApproverReply, type ReplacementRequestContext } from './gemini-parser';
-import { createFailoverModel, GEMINI_MODEL_ID, GROQ_MODEL_ID } from './model-failover';
+import {
+  interpretApproverReply,
+  interpreterFailoverModel,
+  type ReplacementRequestContext,
+} from './gemini-parser';
+import { GEMINI_MODEL_ID, GROQ_MODEL_ID } from './model-failover';
 import { REPLY_VOCABULARY, type ReplyVocabularyEntry } from './reply-vocabulary';
 
 /**
@@ -91,7 +95,7 @@ function modelFor(provider: Provider) {
   const previous = process.env.AI_PROVIDER_ORDER;
   process.env.AI_PROVIDER_ORDER = provider.name;
   try {
-    const model = createFailoverModel();
+    const model = interpreterFailoverModel();
     if (model.modelId !== provider.modelId) {
       throw new Error(
         `Se pidió ${provider.name} (${provider.modelId}) y el failover dio ${model.modelId}. ` +
