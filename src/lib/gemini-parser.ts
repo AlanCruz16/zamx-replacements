@@ -103,7 +103,7 @@ export async function interpretApproverReply(
   replyText: string
 ): Promise<ReplyInterpretation> {
   const { object: interpretation } = await generateObject({
-    model: google('gemini-3.1-flash-lite'),
+    model: google('gemini-3.5-flash-lite'),
     system: interpreterSystemPrompt(request),
     // El cuerpo del correo entra por aquí, como mensaje de usuario, y sólo por
     // aquí — y sin la cadena citada, que no es respuesta de nadie.

@@ -113,7 +113,7 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
   const coreMessages = await convertToModelMessages(messages as UIMessage[]);
 
   const result = streamText({
-    model: google('gemini-3.1-flash-lite'),
+    model: google('gemini-3.5-flash-lite'),
     system: systemPrompt,
     messages: coreMessages,
     tools: {

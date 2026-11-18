@@ -61,6 +61,19 @@ describe('el cuerpo del correo viaja como mensaje de usuario', () => {
     expect(args.system).not.toContain(INYECCION);
   });
 
+  test('lee con gemini-3.5-flash-lite', async () => {
+    // El modelo es una decisión (ADR-0003), y `check:vocabulary` sólo vale
+    // para el modelo contra el que se corrió.
+    generateObject.mockResolvedValue({
+      object: { classification: 'priced_as_suggested', confidence: 1, explanation: 'Aprobado.' },
+    });
+
+    await interpretApproverReply(REQUEST, 'Aprobado');
+
+    const [args] = generateObject.mock.calls[0];
+    expect(args.model).toEqual({ model: 'gemini-3.5-flash-lite' });
+  });
+
   test('la cadena citada no viaja al modelo', async () => {
     // Sólo es seguro desde que el vocabulario vive en el prompt de sistema: la
     // cita era lo único que se lo enseñaba al modelo, y quitarla antes habría
