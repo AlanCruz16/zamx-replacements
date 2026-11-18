@@ -202,8 +202,8 @@ function wait(ms: number, signal: AbortSignal | undefined): Promise<void> {
 
 /**
  * Un modelo nuevo con el orden configurado. Se llama una vez por petición del
- * chat, nunca se comparte entre peticiones. (El intérprete de respuestas del
- * Approver sigue en Gemini solo hasta que Groq pase `check:vocabulary`: ticket 04.)
+ * chat y una vez por interpretación de una respuesta del Approver; nunca se
+ * comparte entre peticiones.
  */
 export function createFailoverModel({ groqRule }: FailoverOptions = {}): LanguageModelV3 {
   const providers = candidates();

@@ -1,9 +1,8 @@
 import { generateObject, type LanguageModel } from 'ai';
-import { google } from '@ai-sdk/google';
 import { z } from 'zod';
 import { CONFIDENCE_THRESHOLD, type ReplyInterpretation } from '../../convex/lib/reply_verdict';
 import { replyBodyForInterpretation } from './reply-body';
-import { createFailoverModel, GEMINI_MODEL_ID } from './model-failover';
+import { createFailoverModel } from './model-failover';
 import { vocabularyPromptBlock } from './reply-vocabulary';
 
 /**
@@ -120,8 +119,8 @@ Si una clave opcional no aplica, omítela: nunca escribas null ni una lista vac�
 
 /**
  * El modelo con failover del intérprete: Gemini primero y Groq con su regla.
- * Uno nuevo por interpretación. Hoy sólo lo usa `check:vocabulary`; el
- * intérprete de producción lo toma en el ticket 04.
+ * Uno nuevo por interpretación, para que una caída a Groq no se arrastre a la
+ * respuesta siguiente.
  */
 export function interpreterFailoverModel() {
   return createFailoverModel({ groqRule: GROQ_INTERPRETER_RULE });
@@ -132,13 +131,17 @@ export function interpreterFailoverModel() {
  * que puede venir fuera de 0–1: acotarla es una regla, y las reglas se aplican
  * en el veredicto, donde hay pruebas que lo comprueban.
  *
+ * Si ninguno de los dos proveedores contesta, lanza: el correo queda sin leer
+ * y el sondeo siguiente lo reintenta, como siempre.
+ *
  * `model` existe para que `check:vocabulary` mida cada proveedor por separado
- * con el mismo prompt (ADR-0003, «Gates»). Quien interpreta de verdad no lo pasa.
+ * con el mismo prompt (ADR-0003, «Gates»). Quien interpreta de verdad no lo
+ * pasa, y recibe un modelo con failover nuevo en cada llamada.
  */
 export async function interpretApproverReply(
   request: ReplacementRequestContext,
   replyText: string,
-  model: LanguageModel = google(GEMINI_MODEL_ID)
+  model: LanguageModel = interpreterFailoverModel()
 ): Promise<ReplyInterpretation> {
   const { object: interpretation } = await generateObject({
     model,

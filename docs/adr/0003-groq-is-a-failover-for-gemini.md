@@ -70,7 +70,11 @@ is a failover, not a replacement"). This decision follows that precedent, includ
     failure («Ok») never reached the model: Groq refused it for reserving 2,048 output tokens,
     more than the 1,000-a-minute cap (see Consequences). Before the rule it was 15/16 on a real
     misreading (the «18 a 22 semanas» range dropped).
-  - Whether a refusal by quota counts against the gate is the owner's call before ticket 04.
+  - **Groq passes the gate** (owner, 2026-11-18): a refusal by quota does not count against it,
+    because such a request surfaces as an error and the email waits for the next poll, as any
+    interpreter failure does. Groq gets no `maxOutputTokens` cap: a cap risks truncating hidden
+    reasoning into invalid JSON, which buys nothing over a refusal. **The interpreter has used
+    the failover since.**
 
 ## Consequences
 
