@@ -26,7 +26,10 @@ is a failover, not a replacement"). This decision follows that precedent, includ
 - **What switches:** 429, 5xx (the 503 above), timeouts and network errors. **Never a 4xx other
   than 429** — that is a bug or a refused request, and a second provider would fail the same way
   or hide it.
-- **Gemini gets `maxRetries: 0`**; the switch to Groq is immediate. Groq keeps one retry.
+- **Gemini gets no retries**; the switch to Groq is immediate. Groq keeps one retry. The
+  failover module (`src/lib/model-failover.ts`) owns these retries itself: no `APICallError`
+  leaves it marked retryable, so the AI SDK's default `maxRetries` never calls a provider again,
+  and call sites do not need `maxRetries: 0`. A 408 counts as a timeout and switches.
 - **Chat switches only before the first chunk.** Once anything has streamed — or
   `submit_quote_request` has run, which creates the Replacement Request and emails the Approver —
   the failure surfaces as it does today. Restarting on Groq could duplicate a Replacement Request.

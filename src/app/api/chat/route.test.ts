@@ -380,6 +380,18 @@ describe('POST /api/chat', () => {
     expect(model.modelId).toBe('gemini-3.5-flash-lite');
   });
 
+  test('cada petición estrena modelo, para que un turno caído a Groq no arrastre al siguiente', async () => {
+    // ADR-0003: el failover se queda en Groq dentro de un turno; el mensaje
+    // siguiente tiene que volver a probar Gemini, y eso sólo pasa con otra instancia.
+    consumeChatRateLimit.mockResolvedValue({ allowed: true });
+    const POST = await loadHandler();
+    await POST(request());
+    await POST(request());
+
+    const [[first], [second]] = streamText.mock.calls;
+    expect(first.model).not.toBe(second.model);
+  });
+
   describe('el aviso al Approver de una Request nueva', () => {
     async function enviarSolicitud() {
       consumeChatRateLimit.mockResolvedValue({ allowed: true });
