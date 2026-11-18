@@ -51,11 +51,31 @@ is a failover, not a replacement"). This decision follows that precedent, includ
 - **The chat's Groq is checked by hand** with `AI_PROVIDER_ORDER=groq`: a full quote, incomplete
   data, a request for prices, and a question about the data plate.
 
+### Results
+
+- **Groq's structured output runs non-strict** (decided 2026-11-18). Groq's strict JSON-schema
+  mode requires every property in `required`, and the interpreter's schema has two optional
+  ones (`newPricesUSD`, `newDeliveryWeeks`), so strict Groq answers every interpretation with a 400. The failover module sends `strictJsonSchema: false` on Groq's calls only; Gemini's schema
+  and prompt are unchanged, and the AI SDK still validates every Groq answer against the same
+  Zod schema (a mismatch throws and the email stays unread).
+- **Vocabulary check, 2026-11-18** (`npm run check:vocabulary`, one run per provider):
+  - `gemini-3.5-flash-lite`: **16/16.**
+  - `qwen/qwen3.8-27b`: **15/16. Fails the gate.** It classifies «Va, mismos precios y entrega
+    de 18 a 22 semanas» as `priced_differently` but returns no `newDeliveryWeeks`, reproducibly.
+    Every vocabulary word passes. (Run with calls 9 s apart; two cases lost to Groq's
+    output-token cap passed when re-run alone. The check now spaces Groq 30 s apart, which has
+    not had a full run yet.) The interpreter stays on Gemini alone until this is resolved;
+    the next step, a Groq-only prompt rule, is the owner's decision.
+
 ## Consequences
 
 - **Groq runs on the free plan: 8,000 tokens a minute**, shared by chat and interpreter. A chat
   turn that ends in `submit_quote_request` is roughly 4–6K tokens, so during an outage Groq
-  carries about one or two chat turns a minute in total. The backup covers short outages with
+  carries about one or two chat turns a minute in total.
+- **The tighter Groq limit is output: 1,000 tokens a minute for this model**, found during the
+  vocabulary gate. Hidden reasoning counts as output, and Groq reserves its own estimate per
+  request (539 tokens in one case, and once 1,840, more than the whole minute, so that request
+  was refused outright). Real backup capacity may be below one chat turn a minute. The backup covers short outages with
   little traffic. If more capacity is ever paid for, it goes to Gemini first, not to the backup.
 - **Prompt changes must be re-measured on both models.**
 - **Customer conversations and Approver replies may be processed by Groq.** The owner judged this

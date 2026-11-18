@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import { generateObject, jsonSchema, stepCountIs, streamText, tool } from 'ai';
+import {
+  generateObject,
+  jsonSchema,
+  NoObjectGeneratedError,
+  stepCountIs,
+  streamText,
+  tool,
+} from 'ai';
 import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
 import { APICallError } from '@ai-sdk/provider';
+import { z } from 'zod';
 import type {
   LanguageModelV3CallOptions,
   LanguageModelV3GenerateResult,
@@ -399,6 +407,32 @@ test('Groq contesta con el razonamiento oculto', async () => {
 
   const [call] = groq.doStreamCalls as LanguageModelV3CallOptions[];
   expect(call.providerOptions?.groq).toMatchObject({ reasoningFormat: 'hidden' });
+});
+
+test('a Groq se le pide el esquema sin modo estricto, y su respuesta se valida igual', async () => {
+  // El modo estricto de Groq exige todas las propiedades en `required`, y el
+  // esquema del intérprete tiene dos opcionales: con él, Groq rechaza la
+  // petición con un 400. La validación contra el esquema la sigue haciendo el SDK.
+  const groq = new MockLanguageModelV3({
+    provider: 'groq',
+    doGenerate: async () => objectResult({ answer: 7 }),
+  });
+  install(failing('google', apiError(503)), groq);
+  const createFailoverModel = await loadFactory();
+
+  const failure = await generateObject({
+    model: createFailoverModel(),
+    // Zod, como el intérprete: `jsonSchema` a secas no valida nada.
+    schema: z.object({ answer: z.string() }),
+    prompt: 'x',
+  }).catch((e: unknown) => e);
+
+  const [call] = groq.doGenerateCalls as LanguageModelV3CallOptions[];
+  expect(call.providerOptions?.groq).toMatchObject({
+    strictJsonSchema: false,
+    reasoningFormat: 'hidden',
+  });
+  expect(NoObjectGeneratedError.isInstance(failure)).toBe(true);
 });
 
 describe('AI_PROVIDER_ORDER', () => {

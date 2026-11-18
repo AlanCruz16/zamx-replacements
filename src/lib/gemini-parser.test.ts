@@ -74,6 +74,19 @@ describe('el cuerpo del correo viaja como mensaje de usuario', () => {
     expect(args.model).toEqual({ model: 'gemini-3.5-flash-lite' });
   });
 
+  test('lee con el modelo que se le da', async () => {
+    // Así `check:vocabulary` mide cada proveedor por separado (ticket 03).
+    generateObject.mockResolvedValue({
+      object: { classification: 'priced_as_suggested', confidence: 1, explanation: 'Aprobado.' },
+    });
+    const otro = { model: 'otro' } as never;
+
+    await interpretApproverReply(REQUEST, 'Aprobado', otro);
+
+    const [args] = generateObject.mock.calls[0];
+    expect(args.model).toBe(otro);
+  });
+
   test('la cadena citada no viaja al modelo', async () => {
     // Sólo es seguro desde que el vocabulario vive en el prompt de sistema: la
     // cita era lo único que se lo enseñaba al modelo, y quitarla antes habría

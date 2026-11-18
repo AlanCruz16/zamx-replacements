@@ -1,8 +1,9 @@
-import { generateObject } from 'ai';
+import { generateObject, type LanguageModel } from 'ai';
 import { google } from '@ai-sdk/google';
 import { z } from 'zod';
 import { CONFIDENCE_THRESHOLD, type ReplyInterpretation } from '../../convex/lib/reply_verdict';
 import { replyBodyForInterpretation } from './reply-body';
+import { GEMINI_MODEL_ID } from './model-failover';
 import { vocabularyPromptBlock } from './reply-vocabulary';
 
 /**
@@ -97,13 +98,17 @@ Si la intención no es clara, "confidence" debe ser menor a ${CONFIDENCE_THRESHO
  * Devuelve la interpretación tal cual la da el modelo, incluida una `confidence`
  * que puede venir fuera de 0–1: acotarla es una regla, y las reglas se aplican
  * en el veredicto, donde hay pruebas que lo comprueban.
+ *
+ * `model` existe para que `check:vocabulary` mida cada proveedor por separado
+ * con el mismo prompt (ADR-0003, «Gates»). Quien interpreta de verdad no lo pasa.
  */
 export async function interpretApproverReply(
   request: ReplacementRequestContext,
-  replyText: string
+  replyText: string,
+  model: LanguageModel = google(GEMINI_MODEL_ID)
 ): Promise<ReplyInterpretation> {
   const { object: interpretation } = await generateObject({
-    model: google('gemini-3.5-flash-lite'),
+    model,
     system: interpreterSystemPrompt(request),
     // El cuerpo del correo entra por aquí, como mensaje de usuario, y sólo por
     // aquí — y sin la cadena citada, que no es respuesta de nadie.

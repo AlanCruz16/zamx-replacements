@@ -23,8 +23,9 @@ import type { LanguageModelV3, LanguageModelV3CallOptions } from '@ai-sdk/provid
  *   llama no tiene que acordarse de pasar `maxRetries: 0`.
  */
 
-const GEMINI_MODEL_ID = 'gemini-3.5-flash-lite';
-const GROQ_MODEL_ID = 'qwen/qwen3.8-27b';
+/** Los modelos que mide `check:vocabulary`: cambiarlos aquí obliga a volver a correrlo. */
+export const GEMINI_MODEL_ID = 'gemini-3.5-flash-lite';
+export const GROQ_MODEL_ID = 'qwen/qwen3.8-27b';
 
 type ProviderName = 'gemini' | 'groq';
 
@@ -131,14 +132,27 @@ function asNonRetryable(error: unknown): unknown {
   });
 }
 
-/** Groq con el razonamiento oculto: nada de él llega al transcript del Customer. */
+/**
+ * Lo que Groq necesita y Gemini no, sin tocar lo que recibe Gemini:
+ *
+ * - **Razonamiento oculto**: nada de él llega al transcript del Customer.
+ * - **Esquema sin modo estricto**: el estricto de Groq exige todas las
+ *   propiedades en `required`, y el esquema del intérprete tiene dos opcionales
+ *   (`newPricesUSD`, `newDeliveryWeeks`); con él, Groq contesta 400. La
+ *   respuesta la sigue validando el SDK contra el mismo esquema, así que nada
+ *   del veredicto se afloja: lo que no cuadra lanza y el correo queda sin leer.
+ */
 function optionsFor(name: ProviderName, options: LanguageModelV3CallOptions) {
   if (name !== 'groq') return options;
   return {
     ...options,
     providerOptions: {
       ...options.providerOptions,
-      groq: { ...options.providerOptions?.groq, reasoningFormat: 'hidden' },
+      groq: {
+        ...options.providerOptions?.groq,
+        reasoningFormat: 'hidden',
+        strictJsonSchema: false,
+      },
     },
   };
 }
