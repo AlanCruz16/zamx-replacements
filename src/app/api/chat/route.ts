@@ -12,8 +12,10 @@ import { Resend } from 'resend';
 import { QuoteRequestTemplate } from '@/emails/QuoteRequestTemplate';
 import {
   consumeChatRateLimit,
+  continuesSubmittedConversation,
   createReplacementRequest,
   persistChatTurn,
+  saveCustomerMessages,
 } from '@/lib/internal-api';
 import { SUPPORT_SENDER } from '@/lib/addresses';
 import { createFailoverModel } from '@/lib/model-failover';
@@ -94,6 +96,50 @@ export async function POST(req: Request) {
     return conversationAlreadySubmitted(language);
   }
 
+  // Lo que se guarda de este transcript. Sus ids los usan las dos preguntas a
+  // Convex: si continúa una conversación enviada, y cuál cerrar si el modelo
+  // envía.
+  const incoming = toStoredMessages(messages ?? []);
+  const messageIds = incoming.map((m) => m.messageId);
+
+  // `findSubmission` sólo ve la copia del navegador, y esa copia puede no traer el
+  // envío: una pestaña que no lo vio, un cuerpo editado, una recarga que llegó
+  // antes de que el turno que envía terminara de guardarse. Así que también se
+  // le pregunta a Convex si alguno de estos mensajes ya está guardado en una
+  // conversación enviada de este Customer. Es la misma regla con la que
+  // `persistTurn` se niega a guardar, de modo que no pueden discrepar.
+  let continuesSubmitted;
+  try {
+    continuesSubmitted = await continuesSubmittedConversation(clerkId, messageIds);
+  } catch (error) {
+    // Como con el límite: si no se puede saber, no se llama al modelo.
+    console.error('No se pudo comprobar si la conversación ya se envió:', error);
+    return new Response(messagesFor(language).chatErrors.unavailable, { status: 503 });
+  }
+
+  if (continuesSubmitted) {
+    return conversationAlreadySubmitted(language);
+  }
+
+  // Lo que el Customer escribió se guarda antes de que el modelo hable (ticket
+  // 05). Así una recarga a media respuesta, o un stream que muere, enseña lo
+  // que dijo y no un chat vacío; y en el primer turno la conversación ya existe
+  // cuando `quotes.create` la busca para cerrarla. Al acabar el stream,
+  // `persistTurn` sólo añade la respuesta.
+  let saved;
+  try {
+    saved = await saveCustomerMessages({ clerkId, messages: incoming });
+  } catch (error) {
+    // Como arriba: sin la conversación guardada, una recarga la perdería.
+    console.error('No se pudo guardar lo que escribió el Customer:', error);
+    return new Response(messagesFor(language).chatErrors.unavailable, { status: 503 });
+  }
+
+  // Se cerró entre la pregunta de arriba y ésta: otra pestaña envió.
+  if (saved.alreadySubmitted) {
+    return conversationAlreadySubmitted(language);
+  }
+
   const systemPrompt = `
 Eres un asistente experto en ventas y cotizaciones de ZIEHL-ABEGG México.
 Tu nombre no importa, representas a ZIEHL-ABEGG.
@@ -160,8 +206,12 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
           }
 
           try {
-            // 1. Guardar la cotización en Convex
-            const result = await createReplacementRequest({ clerkId, products });
+            // 1. Guardar la cotización en Convex. Con los ids, Convex cierra en
+            // la misma transacción la conversación que continúan, y se niega
+            // si ya está cerrada: de dos envíos que compiten —una recarga
+            // temprana, otra pestaña— sólo uno crea la Request (ticket 03). La
+            // negativa lanza, y cae en el `success: false` de abajo, sin correo.
+            const result = await createReplacementRequest({ clerkId, products, messageIds });
 
             // 2. Enviar el email con Resend. Resend no lanza cuando rechaza un
             // envío: devuelve `{ error }`. Sin mirarlo, un dominio sin verificar

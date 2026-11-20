@@ -21,6 +21,8 @@ const {
   authMock,
   consumeChatRateLimit,
   persistChatTurn,
+  saveCustomerMessages,
+  continuesSubmittedConversation,
   streamText,
   createReplacementRequest,
   sendEmail,
@@ -28,6 +30,8 @@ const {
   authMock: vi.fn(),
   consumeChatRateLimit: vi.fn(),
   persistChatTurn: vi.fn(),
+  saveCustomerMessages: vi.fn(),
+  continuesSubmittedConversation: vi.fn(),
   streamText: vi.fn(),
   createReplacementRequest: vi.fn(),
   sendEmail: vi.fn(),
@@ -38,6 +42,8 @@ vi.mock('@clerk/nextjs/server', () => ({ auth: authMock }));
 vi.mock('@/lib/internal-api', () => ({
   consumeChatRateLimit,
   persistChatTurn,
+  saveCustomerMessages,
+  continuesSubmittedConversation,
   createReplacementRequest,
 }));
 
@@ -142,6 +148,8 @@ beforeEach(() => {
   vi.stubEnv('RESEND_API_KEY', 're_prueba');
   vi.stubEnv('GOOGLE_GENERATIVE_AI_API_KEY', 'clave-de-prueba');
   authMock.mockResolvedValue({ userId: 'user_ana' });
+  continuesSubmittedConversation.mockResolvedValue(false);
+  saveCustomerMessages.mockResolvedValue({ alreadySubmitted: false });
   streamText.mockReturnValue({
     toUIMessageStreamResponse: () => new Response('ok', { status: 200 }),
   });
@@ -446,6 +454,63 @@ describe('POST /api/chat', () => {
   });
 
   /**
+   * Ticket 05 — lo que el Customer escribió se guarda antes de llamar al
+   * modelo. Una recarga a media respuesta lo enseña, en vez de un chat vacío; y
+   * en el primer turno la conversación ya existe cuando `quotes.create` la
+   * busca para cerrarla.
+   */
+  describe('lo que escribe el Customer se guarda antes del modelo', () => {
+    test('guarda el transcript entrante, con la identidad de Clerk, antes de llamar al modelo', async () => {
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      const POST = await loadHandler();
+
+      await POST(request());
+
+      expect(saveCustomerMessages).toHaveBeenCalledWith({
+        clerkId: 'user_ana',
+        messages: [{ messageId: 'm1', role: 'user', parts: HOLA[0].parts }],
+      });
+      expect(saveCustomerMessages.mock.invocationCallOrder[0]).toBeLessThan(
+        streamText.mock.invocationCallOrder[0]
+      );
+    });
+
+    test('no se guarda nada de lo que se rechaza por continuar una conversación enviada', async () => {
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      continuesSubmittedConversation.mockResolvedValue(true);
+      const POST = await loadHandler();
+
+      expect((await POST(request())).status).toBe(409);
+      expect((await POST(request('es', YA_ENVIADO))).status).toBe(409);
+      expect(saveCustomerMessages).not.toHaveBeenCalled();
+    });
+
+    test('si la conversación se cerró entre la comprobación y el guardado, responde 409', async () => {
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      saveCustomerMessages.mockResolvedValue({ alreadySubmitted: true });
+      const POST = await loadHandler();
+
+      const res = await POST(request());
+
+      expect(res.status).toBe(409);
+      expect(await res.text()).toContain('Esta conversación ya terminó');
+      expect(streamText).not.toHaveBeenCalled();
+    });
+
+    test('si no se puede guardar, responde 503 y no llama al modelo', async () => {
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      saveCustomerMessages.mockRejectedValue(new Error('Convex no responde'));
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const POST = await loadHandler();
+
+      const res = await POST(request());
+
+      expect(res.status).toBe(503);
+      expect(streamText).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
    * Ticket 21 — una conversación que ya produjo una Replacement Request es de
    * solo lectura. Convex deja de servirla al reanudar, y aquí se rechaza el
    * transcript que la reenvía: sin esto, un cliente que se guardara la
@@ -498,6 +563,71 @@ describe('POST /api/chat', () => {
       ];
 
       expect((await POST(request('es', fallido))).status).toBe(200);
+    });
+
+    /**
+     * Ticket 02: la copia del navegador puede no traer el envío —una pestaña
+     * que no lo vio, un cuerpo editado, una recarga temprana—, así que la ruta
+     * le pregunta también a Convex por lo guardado.
+     */
+    describe('aunque el transcript no traiga el envío', () => {
+      test('si continúa una conversación enviada se rechaza igual, sin modelo', async () => {
+        consumeChatRateLimit.mockResolvedValue({ allowed: true });
+        continuesSubmittedConversation.mockResolvedValue(true);
+        const POST = await loadHandler();
+
+        const res = await POST(request('es', HOLA));
+
+        expect(res.status).toBe(409);
+        expect(await res.text()).toContain('Esta conversación ya terminó');
+        expect(streamText).not.toHaveBeenCalled();
+        expect(persistChatTurn).not.toHaveBeenCalled();
+        expect(createReplacementRequest).not.toHaveBeenCalled();
+      });
+
+      /** La identidad sale de Clerk; lo que manda el navegador no la cambia. */
+      test('pregunta por los ids del transcript, con la identidad de Clerk', async () => {
+        consumeChatRateLimit.mockResolvedValue({ allowed: true });
+        const POST = await loadHandler();
+
+        await POST(
+          new Request('http://localhost:3000/api/chat', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              messages: [
+                ...HOLA,
+                { id: 'm2', role: 'user', parts: [{ type: 'text', text: 'y' }] },
+                { role: 'user', parts: [{ type: 'text', text: 'sin id' }] },
+              ],
+              data: { userName: 'Ana', language: 'es', clerkId: 'user_beto' },
+              clerkId: 'user_beto',
+            }),
+          })
+        );
+
+        expect(continuesSubmittedConversation).toHaveBeenCalledWith('user_ana', ['m1', 'm2']);
+      });
+
+      test('un transcript con el envío dentro se rechaza sin preguntar a Convex', async () => {
+        consumeChatRateLimit.mockResolvedValue({ allowed: true });
+        const POST = await loadHandler();
+
+        expect((await POST(request('es', YA_ENVIADO))).status).toBe(409);
+        expect(continuesSubmittedConversation).not.toHaveBeenCalled();
+      });
+
+      test('si Convex no puede contestar, responde 503 y no llama al modelo', async () => {
+        consumeChatRateLimit.mockResolvedValue({ allowed: true });
+        continuesSubmittedConversation.mockRejectedValue(new Error('Convex no responde'));
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const POST = await loadHandler();
+
+        const res = await POST(request());
+
+        expect(res.status).toBe(503);
+        expect(streamText).not.toHaveBeenCalled();
+      });
     });
   });
 
@@ -576,6 +706,46 @@ describe('POST /api/chat', () => {
         expect.objectContaining({ message: expect.stringContaining('domain not verified') })
       );
       expect(log).not.toHaveBeenCalledWith('Email sent successfully via Resend');
+    });
+
+    /**
+     * Ticket 03: con los ids, Convex cierra en la misma transacción la
+     * conversación que esos mensajes continúan, y se niega si ya está cerrada.
+     */
+    test('pasa los ids del transcript con los productos', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await enviarSolicitud();
+
+      expect(createReplacementRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ clerkId: 'user_ana', messageIds: ['m1'] })
+      );
+    });
+
+    test('si Convex se niega por una conversación ya enviada, falla sin avisar al Approver', async () => {
+      vi.stubEnv('ADMIN_EMAIL', 'ventas@example.com');
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      createReplacementRequest.mockRejectedValue(
+        new Error('La conversación ya envió su Replacement Request.')
+      );
+      const POST = await loadHandler();
+      await POST(request());
+
+      const [{ tools }] = streamText.mock.calls[0];
+      const resultado = await tools.submit_quote_request.execute(
+        {
+          products: [
+            { partNumber: 'P-001', model: 'MK137', quantity: 1, deliveryLocation: 'Monterrey' },
+          ],
+        },
+        { toolCallId: 't1', messages: [] }
+      );
+
+      expect(resultado).toMatchObject({ success: false });
+      expect(sendEmail).not.toHaveBeenCalled();
     });
 
     test('sin ADMIN_EMAIL no se manda a nadie y se dice por qué', async () => {

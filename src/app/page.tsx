@@ -3,7 +3,8 @@
 import { useQuery, useConvexAuth, useMutation } from 'convex/react';
 import { api } from '../../convex/_generated/api';
 import type { Doc } from '../../convex/_generated/dataModel';
-import { findSubmission } from '../../convex/lib/chat';
+import type { FunctionReturnType } from 'convex/server';
+import { findSubmission, SUBMIT_QUOTE_TOOL } from '../../convex/lib/chat';
 import Navbar from '@/components/layout/Navbar';
 import { GooeyText } from '@/components/ui/gooey-text-morphing';
 import { DottedSurface } from '@/components/ui/dotted-surface';
@@ -161,23 +162,71 @@ function ChatScreen({ onLanguage }: { onLanguage: (language: Language) => void }
   // montarse. A partir de ahí manda `useChat` — la consulta es reactiva y sigue
   // devolviendo lo guardado, y re-sembrar con ello pisaría lo que el Customer
   // esté diciendo ahora mismo.
+  //
+  // El envío, en cambio, sí se pasa en cada render, directo de la consulta: es
+  // el estado de la conversación, que vive en su fila (ticket 05, ADR-0004), y
+  // puede llegar después de montarse —la Replacement Request se crea a media respuesta—.
   return (
     <ChatDashboard
       user={user}
       language={language}
       initialMessages={(conversation?.messages ?? []) as UIMessage[]}
+      submission={conversation?.submission ?? null}
     />
   );
+}
+
+/** El envío de la conversación actual, según su fila: el folio y nada más. */
+type RowSubmission = NonNullable<
+  FunctionReturnType<typeof api.chat.currentConversation>
+>['submission'];
+
+/**
+ * El folio que el transcript trae en su tool part, si lo trae. Es lo que la
+ * pantalla recuerda al salirse cuando la fila todavía no lo ha dicho.
+ */
+function folioInTranscript(messages: readonly UIMessage[]): string | undefined {
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type !== `tool-${SUBMIT_QUOTE_TOOL}` || !('output' in part)) continue;
+      const { requestId } = (part.output ?? {}) as { requestId?: unknown };
+      if (typeof requestId === 'string') return requestId;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * La tarjeta del folio cuando el transcript todavía no la trae: la misma tool
+ * part que guarda `persistTurn`, para que la pinte la misma tarjeta y no una
+ * segunda que haya que mantener igual.
+ */
+function folioFromRow(requestId: string): UIMessage {
+  return {
+    id: `submission-${requestId}`,
+    role: 'assistant',
+    parts: [
+      {
+        type: `tool-${SUBMIT_QUOTE_TOOL}`,
+        toolCallId: `submission-${requestId}`,
+        state: 'output-available',
+        input: {},
+        output: { success: true, requestId },
+      },
+    ],
+  } as UIMessage;
 }
 
 function ChatDashboard({
   user,
   language,
   initialMessages,
+  submission,
 }: {
   user: Doc<'users'>;
   language: Language;
   initialMessages: UIMessage[];
+  submission: RowSubmission;
 }) {
   const userRef = useRef(user);
 
@@ -277,7 +326,36 @@ function ChatDashboard({
    * pantalla lo dice antes de que el Customer escriba, en vez de dejarle
    * teclear para contestarle que no.
    */
-  const isSubmitted = findSubmission(messages) !== undefined;
+  const inTranscript = findSubmission(messages) !== undefined;
+
+  /**
+   * El envío que la fila dice que tiene la conversación que está en pantalla
+   * (ticket 05). Empezar otra no cambia la fila —la enviada sigue siendo la
+   * última hasta que el Customer diga algo en la nueva—, así que la pantalla
+   * recuerda de qué Replacement Request se salió y deja de contarla. El folio
+   * se toma de la fila o, si la fila todavía no lo ha dicho, del transcript:
+   * sin eso, la fila que llega tarde volvería a cerrar la pantalla nueva.
+   */
+  const [leftRequestId, setLeftRequestId] = useState<string | null>(null);
+  const rowSubmission =
+    submission !== null && submission.requestId !== leftRequestId ? submission : null;
+
+  /**
+   * Lo dicen la fila o el transcript. La fila cubre la recarga antes de que
+   * `persistTurn` guarde el turno, o un stream que murió; el transcript, la
+   * sesión en vivo, donde `useChat` ve la tool part antes de que Convex conteste.
+   */
+  const isSubmitted = rowSubmission !== null || inTranscript;
+
+  /**
+   * El folio de la fila, si el transcript no lo trae. No mientras el stream
+   * sigue: ahí el folio llega por el propio stream, y pintarlo antes lo
+   * duplicaría un instante.
+   */
+  const renderedMessages =
+    rowSubmission !== null && !inTranscript && !isLoading
+      ? [...messages, folioFromRow(rowSubmission.requestId)]
+      : messages;
 
   /**
    * Empezar de cero: la conversación que hubiera a medias se abandona y la
@@ -320,6 +398,7 @@ function ChatDashboard({
     }
 
     setExitError(false);
+    setLeftRequestId(submission?.requestId ?? folioInTranscript(messages) ?? null);
     setMessages([]);
     setInputValue('');
   };
@@ -333,7 +412,7 @@ function ChatDashboard({
       <Navbar onHome={startNewConversation} />
 
       <main className="flex-1 flex flex-col pt-4 md:pt-8 pl-[calc(1rem+var(--safe-left))] pr-[calc(1rem+var(--safe-right))] pb-[var(--composer-inset)] max-w-4xl mx-auto w-full">
-        {messages.length === 0 ? (
+        {renderedMessages.length === 0 ? (
           /* Welcome Section - Only visible when no messages exist */
           <div className="flex-1 flex flex-col items-center justify-center pt-8 md:pt-16">
             <div
@@ -395,7 +474,7 @@ function ChatDashboard({
         ) : (
           /* Chat Interface */
           <div className="flex-1 flex flex-col gap-6 w-full pb-8">
-            {messages.map((m) => (
+            {renderedMessages.map((m) => (
               <div
                 key={m.id}
                 className={`flex gap-4 w-full ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}

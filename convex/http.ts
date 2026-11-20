@@ -44,6 +44,7 @@ http.route({
     ctx.runMutation(internal.quotes.create, {
       clerkId: body.clerkId,
       products: body.products,
+      messageIds: body.messageIds,
     })
   ),
 });
@@ -83,6 +84,28 @@ http.route({
     ctx.runMutation(internal.chat.persistTurn, {
       clerkId: body.clerkId,
       messages: body.messages,
+    })
+  ),
+});
+
+http.route({
+  path: '/internal/chat/save-customer-messages',
+  method: 'POST',
+  handler: internalRoute((body, ctx) =>
+    ctx.runMutation(internal.chat.saveCustomerMessages, {
+      clerkId: body.clerkId,
+      messages: body.messages,
+    })
+  ),
+});
+
+http.route({
+  path: '/internal/chat/continues-submitted',
+  method: 'POST',
+  handler: internalRoute((body, ctx) =>
+    ctx.runQuery(internal.chat.continuesSubmittedConversation, {
+      clerkId: body.clerkId,
+      messageIds: body.messageIds,
     })
   ),
 });
