@@ -1172,6 +1172,222 @@ describe('un Customer abandona la conversación que tiene abierta', () => {
 });
 
 /**
+ * Ticket 05: el estado de la conversación vive en su fila; el transcript es
+ * sólo lo que se pinta.
+ *
+ * Desde 03/04 la fila sabe que la conversación se envió en cuanto existe la
+ * Replacement Request, pero la pantalla lo leía del transcript que guarda
+ * `persistTurn` al acabar el stream. Una recarga antes de eso —o un stream que
+ * muere— enseñaba una conversación abierta, o vacía, sin folio.
+ */
+describe('la pantalla lee de la fila si la conversación ya se envió', () => {
+  function saveCustomerMessages(t: TestConvex, clerkId: string, messages: unknown[]) {
+    return t.mutation(internal.chat.saveCustomerMessages, {
+      clerkId,
+      messages: messages as ReturnType<typeof textTurn>[],
+    });
+  }
+
+  function current(t: TestConvex, clerkId: string) {
+    return t.withIdentity({ subject: clerkId }).query(api.chat.currentConversation, {});
+  }
+
+  test('una conversación abierta no trae envío', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'Hola')]);
+
+    expect((await current(t, ana))!.submission).toBeNull();
+  });
+
+  test('recarga a media respuesta: lo que escribió el Customer ya está guardado', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')]);
+
+    const conversacion = await current(t, ana);
+    expect(conversacion!.messages).toEqual([
+      asUiMessage(textTurn('msg_1', 'user', 'Quiero cotizar el 162562')),
+    ]);
+    expect(conversacion!.submission).toBeNull();
+  });
+
+  test('guardar lo del Customer reconcilia por id en la conversación abierta', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'Hola')]);
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Hola'), textTurn('msg_2', 'assistant', '¿Pieza?')],
+    });
+
+    await saveCustomerMessages(t, ana, [
+      textTurn('msg_1', 'user', 'Hola'),
+      textTurn('msg_2', 'assistant', '¿Pieza?'),
+      textTurn('msg_3', 'user', '162562'),
+    ]);
+
+    expect(await sesiones(t)).toHaveLength(1);
+    expect((await current(t, ana))!.messages.map((m) => m.id)).toEqual(['msg_1', 'msg_2', 'msg_3']);
+  });
+
+  test('primer turno: la Replacement Request creada antes de guardar el turno ya se lee enviada, con su folio', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'todo de golpe')]);
+    const { requestId } = await createQuote(t, ana, ['msg_1']);
+
+    expect(await sesiones(t)).toHaveLength(1);
+    const conversacion = await current(t, ana);
+    expect(conversacion!.messages.map((m) => m.id)).toEqual(['msg_1']);
+    expect(conversacion!.submission).toEqual({ requestId });
+  });
+
+  test('turno posterior: igual, sin esperar a que se guarde la respuesta', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'Hola')]);
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Hola'), textTurn('msg_2', 'assistant', '¿Pieza?')],
+    });
+
+    const turno = [
+      textTurn('msg_1', 'user', 'Hola'),
+      textTurn('msg_2', 'assistant', '¿Pieza?'),
+      textTurn('msg_3', 'user', '162562, confirmo'),
+    ];
+    await saveCustomerMessages(t, ana, turno);
+    const { requestId } = await createQuote(t, ana, ['msg_1', 'msg_2', 'msg_3']);
+
+    const conversacion = await current(t, ana);
+    expect(conversacion!.messages.map((m) => m.id)).toEqual(['msg_1', 'msg_2', 'msg_3']);
+    expect(conversacion!.submission).toEqual({ requestId });
+  });
+
+  test('si el stream muere y la respuesta nunca se guarda, sigue enviada', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'todo de golpe')]);
+    const { requestId } = await createQuote(t, ana, ['msg_1']);
+
+    // Sin `persistTurn`: la respuesta se perdió con el stream.
+    expect((await current(t, ana))!.submission).toEqual({ requestId });
+    expect(await continuesSubmitted(t, ana, ['msg_1'])).toBe(true);
+  });
+
+  test('cuando el turno sí se guarda, se guarda entero en la conversación que cerró', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'todo de golpe')]);
+    const { quoteId, requestId } = await createQuote(t, ana, ['msg_1']);
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'todo de golpe'), submittedTurn('msg_2', quoteId)],
+    });
+
+    expect(await sesiones(t)).toHaveLength(1);
+    const conversacion = await current(t, ana);
+    expect(conversacion!.messages.map((m) => m.id)).toEqual(['msg_1', 'msg_2']);
+    expect(findSubmission(conversacion!.messages)).toEqual({ quoteId, messageId: 'msg_2' });
+    expect(conversacion!.submission).toEqual({ requestId });
+  });
+
+  test('dos envíos del primer turno que compiten siguen creando una sola Replacement Request', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    const turno = async () => {
+      await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'todo de golpe')]);
+      return await createQuote(t, ana, ['msg_1']);
+    };
+
+    const resultados = await Promise.allSettled([turno(), turno()]);
+
+    expect(resultados.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(await t.run(async (ctx) => ctx.db.query('quotes').collect())).toHaveLength(1);
+    expect(await sesiones(t)).toHaveLength(1);
+  });
+
+  test('lo que continúa una conversación enviada no se guarda', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'todo de golpe')]);
+    await createQuote(t, ana, ['msg_1']);
+
+    await expect(
+      saveCustomerMessages(t, ana, [
+        textTurn('msg_1', 'user', 'todo de golpe'),
+        textTurn('msg_5', 'user', '¿y otra?'),
+      ])
+    ).resolves.toEqual({ alreadySubmitted: true });
+    expect(await sesiones(t)).toHaveLength(1);
+  });
+
+  test('una identidad sin Customer no guarda nada', async () => {
+    const t = convexTest(schema, modules);
+
+    await expect(
+      saveCustomerMessages(t, 'user_nadie', [textTurn('msg_1', 'user', 'Hola')])
+    ).rejects.toThrow('Usuario no encontrado');
+    expect(await sesiones(t)).toHaveLength(0);
+  });
+
+  test('una Replacement Request que no es del Customer no se le devuelve', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    const beto = await seedCustomer(t, 'user_beto', 'Beto');
+    await saveCustomerMessages(t, ana, [textTurn('msg_1', 'user', 'Hola')]);
+    const deBeto = await seedQuote(t, beto);
+
+    await t.run(async (ctx) => {
+      const [sesion] = await ctx.db.query('chat_sessions').collect();
+      await ctx.db.patch(sesion._id, { submittedAt: Date.now(), submittedQuoteId: deBeto });
+    });
+
+    expect((await current(t, ana))!.submission).toBeNull();
+  });
+
+  test('una conversación reservada sin mensajes guardados se lee enviada igual', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+
+    const { requestId } = await createQuote(t, ana, ['msg_1']);
+
+    expect(await current(t, ana)).toEqual({ messages: [], submission: { requestId } });
+  });
+
+  test('`saveCustomerMessages` es interna y exige el secreto en su frontera', async () => {
+    expect(chat.saveCustomerMessages.isInternal).toBe(true);
+
+    const t = convexTest(schema, modules);
+    await seedCustomer(t, 'user_ana');
+    const body = JSON.stringify({
+      clerkId: 'user_ana',
+      messages: [{ messageId: 'msg_1', role: 'user', parts: [{ type: 'text', text: 'hola' }] }],
+    });
+
+    const sinSecreto = await t.fetch('/internal/chat/save-customer-messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+    });
+    expect(sinSecreto.status).toBe(401);
+    expect(await sesiones(t)).toHaveLength(0);
+
+    const conSecreto = await t.fetch('/internal/chat/save-customer-messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-internal-secret': INTERNAL_SECRET },
+      body,
+    });
+    expect(conSecreto.status).toBe(200);
+    expect(await sesiones(t)).toHaveLength(1);
+  });
+});
+
+/**
  * Ticket 06 — la autorización se reduce a dos reglas. La conversación es una
  * superficie del Customer, así que se lee con la identidad de Clerk; se escribe
  * por el camino máquina a máquina, porque quien sabe de verdad lo que dijo el

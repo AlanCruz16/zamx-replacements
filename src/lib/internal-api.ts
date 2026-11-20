@@ -110,6 +110,16 @@ export function persistChatTurn(
 }
 
 /**
+ * Guarda lo que el Customer acaba de mandar, antes de llamar al modelo (ticket
+ * 05): una recarga a media respuesta enseña lo que escribió, no un chat vacío.
+ */
+export function saveCustomerMessages(
+  args: FunctionArgs<typeof internal.chat.saveCustomerMessages>
+): Promise<FunctionReturnType<typeof internal.chat.saveCustomerMessages>> {
+  return callInternalConvex('/internal/chat/save-customer-messages', args);
+}
+
+/**
  * Si alguno de estos mensajes ya está guardado en una conversación enviada de
  * este Customer. La ruta del chat lo pregunta antes de llamar al modelo: la
  * copia que manda el navegador puede no traer el envío, y lo guardado sí.

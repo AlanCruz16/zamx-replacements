@@ -8,7 +8,7 @@ import {
   type QueryCtx,
 } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { findSubmission, toTranscriptMessages, type Submission } from './lib/chat';
+import { findSubmission, toTranscriptMessages, type StoredRole, type Submission } from './lib/chat';
 
 /**
  * Dónde vive una conversación del chat entre una pestaña y la siguiente
@@ -312,9 +312,13 @@ async function userByClerkId(ctx: QueryCtx, clerkId: string) {
  * Una conversación ya enviada se devuelve igual: es de **solo lectura**, no
  * invisible. Dentro de ella va la tool part con la que se le confirmó su folio,
  * y esconderla haría que un refresco le costara justo la confirmación que el
- * ticket existe para que no se pierda. Que ya no admite mensajes se ve en el
- * propio transcript —lo mira `findSubmission`, igual que el servidor—, así que
- * no hace falta que viaje aparte.
+ * ticket existe para que no se pierda.
+ *
+ * Que ya no admite mensajes viaja aparte, en `submission`, leído de la fila y
+ * no del transcript (ticket 05, ADR-0004). La fila lo sabe desde que se crea la
+ * Replacement Request; el transcript, sólo cuando `persistTurn` guarda el turno
+ * al acabar el stream —o nunca, si el stream muere—. Con `submission` una
+ * recarga en ese hueco enseña el folio y no una conversación abierta.
  *
  * También devuelve `null` mientras no haya todavía a quién contestarle: sin
  * identidad de Clerk, o con una identidad cuyo Customer aún no aterrizó por el
@@ -348,9 +352,32 @@ export const currentConversation = query({
     // igual— y el Customer seguiría atrapado dentro de ella.
     if (isAbandoned(session)) return null;
 
-    return { messages: toTranscriptMessages(await messagesOf(ctx, session._id)) };
+    return {
+      messages: toTranscriptMessages(await messagesOf(ctx, session._id)),
+      submission: await submissionOf(ctx, session),
+    };
   },
 });
+
+/**
+ * Lo que la pantalla necesita saber del envío de una conversación, leído de su
+ * fila (ticket 05): el folio, y nada más. Las cifras de la Replacement Request
+ * son Suggested Prices, que el Customer no ve nunca.
+ *
+ * Sólo si la Replacement Request es de quien la conversación es: un `submittedQuoteId` que
+ * no es suyo contesta `null`, igual que no haber enviado.
+ */
+async function submissionOf(
+  ctx: QueryCtx,
+  session: Doc<'chat_sessions'>
+): Promise<{ requestId: string } | null> {
+  if (session.submittedQuoteId === undefined) return null;
+
+  const request = await ctx.db.get(session.submittedQuoteId);
+  if (request === null || request.userId !== session.userId) return null;
+
+  return { requestId: request.requestId };
+}
 
 /**
  * El Customer se sale de la conversación que tiene a medias.
@@ -422,8 +449,13 @@ export const continuesSubmittedConversation = internalQuery({
 });
 
 /**
- * Guarda el turno recién terminado y, si en él disparó `submit_quote_request`,
- * cierra la conversación.
+ * Guarda el turno recién terminado: en la práctica, la respuesta del modelo.
+ *
+ * Desde el ticket 05 lo que el Customer escribió ya está guardado antes de
+ * llamar al modelo (`saveCustomerMessages`), y la conversación ya está cerrada
+ * desde que `quotes.create` creó su Replacement Request (ticket 03). Perder
+ * este paso —un stream que muere— cuesta el texto de la respuesta, no el
+ * estado de la conversación.
  *
  * Recibe el transcript entero, no sólo lo nuevo: es lo que el AI SDK entrega al
  * acabar el stream, y reconciliar por el `id` del mensaje sale más barato que
@@ -431,9 +463,10 @@ export const continuesSubmittedConversation = internalQuery({
  * está se reescribe en su sitio, que es además lo que hace que un turno
  * reenviado no deje copias.
  *
- * Que la conversación se cierre se **deduce del propio transcript** en vez de
- * recibirse como argumento, para que el registro y el estado no puedan
- * contradecirse: lo que la cierra es exactamente la part que se guarda en ella.
+ * Si el transcript trae un envío y la conversación todavía no está cerrada —un
+ * envío sin ids con los que `quotes.create` pudiera encontrarla—, la cierra
+ * aquí, deducido del propio transcript para que el registro y el estado no
+ * puedan contradecirse.
  */
 export const persistTurn = internalMutation({
   args: {
@@ -475,49 +508,10 @@ export const persistTurn = internalMutation({
     }
 
     const now = Date.now();
-    const latest = await latestSession(ctx, user._id);
-    const open = openSession(latest);
-
-    // El turno que terminó después de que el Customer se saliera. El stream
-    // seguía en vuelo cuando «Inicio» abandonó la conversación, así que este
-    // transcript llega cuando ya no hay ninguna abierta donde ponerlo.
-    //
-    // Sin esto abría una conversación nueva y le copiaba dentro todo lo dicho
-    // en la abandonada, que pasaba a ser la actual: la pantalla resembraba en
-    // la carga siguiente justo la conversación de la que el Customer acababa de
-    // salirse —el ticket 21 otra vez—, y además con los mensajes duplicados en
-    // dos sesiones. Lo mismo ocurría con dos pestañas abiertas.
-    //
-    // Va a su conversación de origen, que se reconoce por los mensajes que ya
-    // guarda y no por ser la última. Guardarlo ahí no la resucita: abandonada
-    // sigue, y `currentConversation` no devuelve una abandonada. Lo dicho en
-    // ella se conserva —también la respuesta que el modelo alcanzó a dar— sin
-    // que vuelva a ser la conversación de nadie.
-    const abandoned =
-      open === null && latest !== null && isAbandoned(latest) && !isSubmitted(latest)
-        ? latest
-        : null;
-    const inFlight =
-      abandoned !== null && (await continues(ctx, abandoned._id, args.messages)) ? abandoned : null;
-
     const sessionId =
-      closedByTurn?._id ??
-      open?._id ??
-      inFlight?._id ??
-      (await ctx.db.insert('chat_sessions', { userId: user._id, lastMessageAt: now }));
+      closedByTurn?._id ?? (await conversationForTurn(ctx, user._id, args.messages));
 
-    const byMessageId = new Map((await messagesOf(ctx, sessionId)).map((m) => [m.messageId, m]));
-
-    for (const message of args.messages) {
-      const already = byMessageId.get(message.messageId);
-      if (already === undefined) {
-        await ctx.db.insert('chat_messages', { sessionId, ...message });
-      } else {
-        await ctx.db.patch(already._id, { role: message.role, parts: message.parts });
-      }
-    }
-
-    await ctx.db.patch(sessionId, { lastMessageAt: now });
+    await writeMessages(ctx, sessionId, args.messages);
 
     // Ya cerrada con su Replacement Request al crearse ésta: no hay nada más
     // que apuntar, y reescribir `submittedAt` movería la hora del envío.
@@ -538,5 +532,115 @@ export const persistTurn = internalMutation({
     });
 
     return null;
+  },
+});
+
+/**
+ * La conversación en la que se guarda un turno que no cerró ninguna: la
+ * abierta, la abandonada de la que viene, o una nueva.
+ */
+async function conversationForTurn(
+  ctx: MutationCtx,
+  userId: Id<'users'>,
+  messages: { messageId: string }[]
+): Promise<Id<'chat_sessions'>> {
+  const latest = await latestSession(ctx, userId);
+  const open = openSession(latest);
+
+  // El turno que terminó después de que el Customer se saliera. El stream
+  // seguía en vuelo cuando «Inicio» abandonó la conversación, así que este
+  // transcript llega cuando ya no hay ninguna abierta donde ponerlo.
+  //
+  // Sin esto abría una conversación nueva y le copiaba dentro todo lo dicho
+  // en la abandonada, que pasaba a ser la actual: la pantalla resembraba en
+  // la carga siguiente justo la conversación de la que el Customer acababa de
+  // salirse —el ticket 21 otra vez—, y además con los mensajes duplicados en
+  // dos sesiones. Lo mismo ocurría con dos pestañas abiertas.
+  //
+  // Va a su conversación de origen, que se reconoce por los mensajes que ya
+  // guarda y no por ser la última. Guardarlo ahí no la resucita: abandonada
+  // sigue, y `currentConversation` no devuelve una abandonada. Lo dicho en
+  // ella se conserva —también la respuesta que el modelo alcanzó a dar— sin
+  // que vuelva a ser la conversación de nadie.
+  const abandoned =
+    open === null && latest !== null && isAbandoned(latest) && !isSubmitted(latest) ? latest : null;
+  const inFlight =
+    abandoned !== null && (await continues(ctx, abandoned._id, messages)) ? abandoned : null;
+
+  return (
+    open?._id ??
+    inFlight?._id ??
+    (await ctx.db.insert('chat_sessions', { userId, lastMessageAt: Date.now() }))
+  );
+}
+
+/**
+ * Escribe los mensajes en su conversación, reconciliando por `messageId`: el
+ * que ya está se reescribe en su sitio, así que guardar el mismo turno dos
+ * veces —antes del modelo y al acabar el stream— no deja copias.
+ */
+async function writeMessages(
+  ctx: MutationCtx,
+  sessionId: Id<'chat_sessions'>,
+  messages: { messageId: string; role: StoredRole; parts: unknown[] }[]
+): Promise<void> {
+  const byMessageId = new Map((await messagesOf(ctx, sessionId)).map((m) => [m.messageId, m]));
+
+  for (const message of messages) {
+    const already = byMessageId.get(message.messageId);
+    if (already === undefined) {
+      await ctx.db.insert('chat_messages', { sessionId, ...message });
+    } else {
+      await ctx.db.patch(already._id, { role: message.role, parts: message.parts });
+    }
+  }
+
+  await ctx.db.patch(sessionId, { lastMessageAt: Date.now() });
+}
+
+/**
+ * Guarda lo que el Customer acaba de mandar **antes** de llamar al modelo
+ * (ticket 05).
+ *
+ * Hasta aquí todo el turno se guardaba al acabar el stream, en `persistTurn`.
+ * Una recarga a media respuesta —o un stream que moría— enseñaba entonces el
+ * chat vacío, o la conversación sin lo último que el Customer escribió. Ahora
+ * lo suyo está guardado antes de que el modelo hable, y `persistTurn` sólo
+ * añade la respuesta.
+ *
+ * Es además lo que hace que, en el primer turno, la conversación ya exista con
+ * su mensaje cuando `quotes.create` la busca: la encuentra por sus ids, como a
+ * cualquier otra, y la reserva del ticket 04 queda para el caso en que no haya
+ * nada guardado. La carrera del primer turno sigue resuelta: dos peticiones
+ * con el mismo transcript escriben en la misma conversación —la segunda
+ * encuentra abierta la que creó la primera—, y sus dos `quotes.create` leen esa
+ * misma fila, así que sólo uno crea la Request.
+ *
+ * Aplica la regla del ticket 02 igual que `persistTurn`: un transcript que
+ * continúa una conversación enviada no se guarda en ninguna parte. La ruta ya
+ * lo rechaza antes con un 409, pero la conversación puede cerrarse entre esa
+ * pregunta y ésta —otra pestaña que envía—, así que se contesta en vez de
+ * lanzar: la ruta responde el mismo 409, no un 503 que no es verdad.
+ */
+export const saveCustomerMessages = internalMutation({
+  args: {
+    clerkId: v.string(),
+    messages: v.array(messageValidator),
+  },
+  handler: async (ctx, args) => {
+    const user = await userByClerkId(ctx, args.clerkId);
+    if (!user) {
+      throw new Error('Usuario no encontrado en la base de datos.');
+    }
+
+    const messageIds = args.messages.map((m) => m.messageId);
+    if (await continuesAnySubmitted(ctx, user._id, messageIds)) {
+      return { alreadySubmitted: true };
+    }
+
+    const sessionId = await conversationForTurn(ctx, user._id, args.messages);
+    await writeMessages(ctx, sessionId, args.messages);
+
+    return { alreadySubmitted: false };
   },
 });

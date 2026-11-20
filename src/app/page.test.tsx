@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { act } from 'react';
 import { montar } from '@/test/render-component';
 import { LANGUAGES, messagesFor, type Language } from '@/lib/messages';
 import { distinctivePhrases, otherLanguage } from '@/test/languages';
@@ -320,6 +321,99 @@ describe('la pantalla de chat', () => {
     await vi.waitFor(() => expect(readableText(container)).toContain(t.exitFailed));
     expect(chat.setMessages).not.toHaveBeenCalledWith([]);
     registrado.mockRestore();
+  });
+});
+
+/**
+ * Ticket 05: si la conversación ya se envió lo dice su fila, no el transcript.
+ *
+ * El transcript con el folio lo guarda `persistTurn` al acabar el stream; la
+ * fila sabe que la conversación se envió desde que existe la Replacement
+ * Request. Una recarga en ese hueco —o después de un stream que murió— traía
+ * sólo lo que el Customer escribió, y la pantalla lo pintaba abierto y sin
+ * folio.
+ */
+describe('la pantalla lee de la fila si la conversación ya se envió', () => {
+  const PREGUNTA = {
+    id: 'm1',
+    role: 'user',
+    parts: [{ type: 'text', text: 'Quiero cotizar el 162562' }],
+  };
+  const FOLIO_EN_EL_TRANSCRIPT = {
+    id: 'm2',
+    role: 'assistant',
+    parts: [
+      {
+        type: 'tool-submit_quote_request',
+        state: 'output-available',
+        output: { success: true, requestId: 'REQ-ROW123' },
+      },
+    ],
+  };
+
+  function recargada(
+    submission: { requestId: string } | null,
+    messages: unknown[] = [PREGUNTA],
+    overrides: Record<string, unknown> = {}
+  ) {
+    return renderScreen({
+      user: customer('es'),
+      conversation: { messages, submission },
+      chat: chatState({ messages, ...overrides }),
+    });
+  }
+
+  function botonEmpezarOtra(container: HTMLElement) {
+    return [...container.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes(messagesFor('es').chat.startNewConversation)
+    );
+  }
+
+  test('recarga antes de guardar el turno: lo escrito, el folio, y sin compositor', async () => {
+    const container = await recargada({ requestId: 'REQ-ROW123' });
+    const t = messagesFor('es').chat;
+
+    expect(container.textContent).toContain('Quiero cotizar el 162562');
+    expect(container.textContent).toContain(t.submittedTitle);
+    expect(container.textContent).toContain('REQ-ROW123');
+    expect(botonEmpezarOtra(container)).toBeDefined();
+    expect(container.querySelector('input')).toBeNull();
+  });
+
+  test('una conversación abierta deja el compositor abierto y no pinta folio', async () => {
+    const container = await recargada(null);
+
+    expect(container.textContent).toContain('Quiero cotizar el 162562');
+    expect(container.textContent).not.toContain(messagesFor('es').chat.submittedTitle);
+    expect(container.querySelector('input')).not.toBeNull();
+  });
+
+  test('con el folio ya en el transcript no se pinta dos veces', async () => {
+    const container = await recargada({ requestId: 'REQ-ROW123' }, [
+      PREGUNTA,
+      FOLIO_EN_EL_TRANSCRIPT,
+    ]);
+
+    expect(container.textContent!.split('REQ-ROW123')).toHaveLength(2);
+  });
+
+  test('mientras el stream sigue, el folio lo trae el propio stream', async () => {
+    const container = await recargada({ requestId: 'REQ-ROW123' }, [PREGUNTA], {
+      status: 'streaming',
+    });
+
+    expect(container.textContent).not.toContain('REQ-ROW123');
+    // Pero la conversación ya está cerrada: no se le deja escribir.
+    expect(container.querySelector('input')).toBeNull();
+  });
+
+  test('empezar otra deja escribir aunque la fila siga diciendo que la anterior se envió', async () => {
+    const container = await recargada({ requestId: 'REQ-ROW123' });
+
+    act(() => botonEmpezarOtra(container)!.click());
+
+    await vi.waitFor(() => expect(container.querySelector('input')).not.toBeNull());
+    expect(container.textContent).not.toContain('REQ-ROW123');
   });
 });
 

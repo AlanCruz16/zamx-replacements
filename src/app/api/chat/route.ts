@@ -15,6 +15,7 @@ import {
   continuesSubmittedConversation,
   createReplacementRequest,
   persistChatTurn,
+  saveCustomerMessages,
 } from '@/lib/internal-api';
 import { SUPPORT_SENDER } from '@/lib/addresses';
 import { createFailoverModel } from '@/lib/model-failover';
@@ -95,9 +96,11 @@ export async function POST(req: Request) {
     return conversationAlreadySubmitted(language);
   }
 
-  // Los ids de este transcript. Los usan las dos preguntas a Convex: si
-  // continúa una conversación enviada, y cuál cerrar si el modelo envía.
-  const messageIds = toStoredMessages(messages ?? []).map((m) => m.messageId);
+  // Lo que se guarda de este transcript. Sus ids los usan las dos preguntas a
+  // Convex: si continúa una conversación enviada, y cuál cerrar si el modelo
+  // envía.
+  const incoming = toStoredMessages(messages ?? []);
+  const messageIds = incoming.map((m) => m.messageId);
 
   // `findSubmission` sólo ve la copia del navegador, y esa copia puede no traer el
   // envío: una pestaña que no lo vio, un cuerpo editado, una recarga que llegó
@@ -115,6 +118,25 @@ export async function POST(req: Request) {
   }
 
   if (continuesSubmitted) {
+    return conversationAlreadySubmitted(language);
+  }
+
+  // Lo que el Customer escribió se guarda antes de que el modelo hable (ticket
+  // 05). Así una recarga a media respuesta, o un stream que muere, enseña lo
+  // que dijo y no un chat vacío; y en el primer turno la conversación ya existe
+  // cuando `quotes.create` la busca para cerrarla. Al acabar el stream,
+  // `persistTurn` sólo añade la respuesta.
+  let saved;
+  try {
+    saved = await saveCustomerMessages({ clerkId, messages: incoming });
+  } catch (error) {
+    // Como arriba: sin la conversación guardada, una recarga la perdería.
+    console.error('No se pudo guardar lo que escribió el Customer:', error);
+    return new Response(messagesFor(language).chatErrors.unavailable, { status: 503 });
+  }
+
+  // Se cerró entre la pregunta de arriba y ésta: otra pestaña envió.
+  if (saved.alreadySubmitted) {
     return conversationAlreadySubmitted(language);
   }
 

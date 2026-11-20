@@ -21,6 +21,7 @@ const {
   authMock,
   consumeChatRateLimit,
   persistChatTurn,
+  saveCustomerMessages,
   continuesSubmittedConversation,
   streamText,
   createReplacementRequest,
@@ -29,6 +30,7 @@ const {
   authMock: vi.fn(),
   consumeChatRateLimit: vi.fn(),
   persistChatTurn: vi.fn(),
+  saveCustomerMessages: vi.fn(),
   continuesSubmittedConversation: vi.fn(),
   streamText: vi.fn(),
   createReplacementRequest: vi.fn(),
@@ -40,6 +42,7 @@ vi.mock('@clerk/nextjs/server', () => ({ auth: authMock }));
 vi.mock('@/lib/internal-api', () => ({
   consumeChatRateLimit,
   persistChatTurn,
+  saveCustomerMessages,
   continuesSubmittedConversation,
   createReplacementRequest,
 }));
@@ -146,6 +149,7 @@ beforeEach(() => {
   vi.stubEnv('GOOGLE_GENERATIVE_AI_API_KEY', 'clave-de-prueba');
   authMock.mockResolvedValue({ userId: 'user_ana' });
   continuesSubmittedConversation.mockResolvedValue(false);
+  saveCustomerMessages.mockResolvedValue({ alreadySubmitted: false });
   streamText.mockReturnValue({
     toUIMessageStreamResponse: () => new Response('ok', { status: 200 }),
   });
@@ -446,6 +450,63 @@ describe('POST /api/chat', () => {
 
       expect(res.status).toBe(200);
       expect(error).toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Ticket 05 — lo que el Customer escribió se guarda antes de llamar al
+   * modelo. Una recarga a media respuesta lo enseña, en vez de un chat vacío; y
+   * en el primer turno la conversación ya existe cuando `quotes.create` la
+   * busca para cerrarla.
+   */
+  describe('lo que escribe el Customer se guarda antes del modelo', () => {
+    test('guarda el transcript entrante, con la identidad de Clerk, antes de llamar al modelo', async () => {
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      const POST = await loadHandler();
+
+      await POST(request());
+
+      expect(saveCustomerMessages).toHaveBeenCalledWith({
+        clerkId: 'user_ana',
+        messages: [{ messageId: 'm1', role: 'user', parts: HOLA[0].parts }],
+      });
+      expect(saveCustomerMessages.mock.invocationCallOrder[0]).toBeLessThan(
+        streamText.mock.invocationCallOrder[0]
+      );
+    });
+
+    test('no se guarda nada de lo que se rechaza por continuar una conversación enviada', async () => {
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      continuesSubmittedConversation.mockResolvedValue(true);
+      const POST = await loadHandler();
+
+      expect((await POST(request())).status).toBe(409);
+      expect((await POST(request('es', YA_ENVIADO))).status).toBe(409);
+      expect(saveCustomerMessages).not.toHaveBeenCalled();
+    });
+
+    test('si la conversación se cerró entre la comprobación y el guardado, responde 409', async () => {
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      saveCustomerMessages.mockResolvedValue({ alreadySubmitted: true });
+      const POST = await loadHandler();
+
+      const res = await POST(request());
+
+      expect(res.status).toBe(409);
+      expect(await res.text()).toContain('Esta conversación ya terminó');
+      expect(streamText).not.toHaveBeenCalled();
+    });
+
+    test('si no se puede guardar, responde 503 y no llama al modelo', async () => {
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      saveCustomerMessages.mockRejectedValue(new Error('Convex no responde'));
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const POST = await loadHandler();
+
+      const res = await POST(request());
+
+      expect(res.status).toBe(503);
+      expect(streamText).not.toHaveBeenCalled();
     });
   });
 

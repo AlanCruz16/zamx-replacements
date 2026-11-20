@@ -89,6 +89,17 @@ http.route({
 });
 
 http.route({
+  path: '/internal/chat/save-customer-messages',
+  method: 'POST',
+  handler: internalRoute((body, ctx) =>
+    ctx.runMutation(internal.chat.saveCustomerMessages, {
+      clerkId: body.clerkId,
+      messages: body.messages,
+    })
+  ),
+});
+
+http.route({
   path: '/internal/chat/continues-submitted',
   method: 'POST',
   handler: internalRoute((body, ctx) =>
