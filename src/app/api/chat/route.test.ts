@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
+import { MockLanguageModelV3, simulateReadableStream } from 'ai/test';
+import type { LanguageModelV3StreamPart } from '@ai-sdk/provider';
+import { findSubmission, toTranscriptMessages } from '../../../../convex/lib/chat';
 
 /**
  * Seam 2 — el techo del chat visto desde la ruta.
@@ -130,9 +133,6 @@ function capturarFinDelStream() {
     async terminar(messages: any[]) {
       await options.onFinish({ messages, isContinuation: false, isAborted: false });
     },
-    get originalMessages() {
-      return options?.originalMessages;
-    },
   };
 }
 
@@ -150,6 +150,9 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.clearAllMocks();
+  // Los `vi.spyOn(console, …)` de cada prueba: sin esto, una prueba que silencia
+  // la consola la deja silenciada para las que vienen detrás.
+  vi.restoreAllMocks();
 });
 
 describe('POST /api/chat', () => {
@@ -269,18 +272,157 @@ describe('POST /api/chat', () => {
     });
 
     /**
-     * El SDK sólo asigna `id` al mensaje de respuesta cuando se le pasan los
-     * mensajes originales. Sin `id` no hay forma de reconciliar el turno
-     * siguiente contra lo guardado, y cada reenvío dejaría copias.
+     * La respuesta del modelo se guarda con su propio turno. Antes llegaba a
+     * `onFinish` con `id: ""` —el SDK sólo le pone `id` cuando se le da con qué
+     * generarlo— y `toStoredMessages` la descartaba: se guardaba un turno más
+     * tarde, cuando el navegador la reenviaba. El último turno, el del folio, no
+     * tiene «un turno más tarde», y al recargar la conversación volvía abierta.
+     *
+     * Se maneja el `streamText` de verdad, con el modelo cortado en su
+     * frontera, porque lo que falla es el contrato con el SDK y un doble de
+     * `toUIMessageStreamResponse` no lo puede ver.
      */
-    test('le pasa al SDK los mensajes originales, para que la respuesta traiga id', async () => {
-      consumeChatRateLimit.mockResolvedValue({ allowed: true });
-      const stream = capturarFinDelStream();
-      const POST = await loadHandler();
+    describe('con el SDK de verdad', () => {
+      const USO = {
+        inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
+        outputTokens: { total: 1, text: 1, reasoning: 0 },
+      };
 
-      await POST(request());
+      function texto(t: string): LanguageModelV3StreamPart[] {
+        return [
+          { type: 'stream-start', warnings: [] },
+          { type: 'text-start', id: 't' },
+          { type: 'text-delta', id: 't', delta: t },
+          { type: 'text-end', id: 't' },
+          { type: 'finish', finishReason: { unified: 'stop', raw: 'stop' }, usage: USO },
+        ];
+      }
 
-      expect(stream.originalMessages).toEqual(HOLA);
+      function llamada(toolName: string, input: object): LanguageModelV3StreamPart[] {
+        return [
+          { type: 'stream-start', warnings: [] },
+          { type: 'tool-call', toolCallId: 'call_1', toolName, input: JSON.stringify(input) },
+          {
+            type: 'finish',
+            finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+            usage: USO,
+          },
+        ];
+      }
+
+      /** Un modelo que contesta, paso a paso, lo que se le da. */
+      function modeloQueContesta(...pasos: LanguageModelV3StreamPart[][]) {
+        let paso = 0;
+        return new MockLanguageModelV3({
+          doStream: async () => ({
+            stream: simulateReadableStream({ chunks: pasos[Math.min(paso++, pasos.length - 1)] }),
+          }),
+        });
+      }
+
+      async function turnoCompleto(
+        modelo = modeloQueContesta(texto('¿Número de parte?')),
+        messages: unknown[] = HOLA
+      ) {
+        const actual = await vi.importActual<typeof import('ai')>('ai');
+        streamText.mockImplementation((opts) => actual.streamText({ ...opts, model: modelo }));
+        consumeChatRateLimit.mockResolvedValue({ allowed: true });
+        const POST = await loadHandler();
+
+        const res = await POST(request('es', messages));
+        // Leer el stream entero es lo que hace el navegador, y lo que dispara
+        // el `onFinish` en el que la ruta guarda.
+        const cuerpo = await res.text();
+        await vi.waitFor(() => expect(persistChatTurn).toHaveBeenCalled());
+
+        const inicio = cuerpo
+          .split('\n')
+          .filter((l) => l.startsWith('data: {'))
+          .map((l) => JSON.parse(l.slice('data: '.length)))
+          .find((chunk) => chunk.type === 'start');
+
+        return { guardados: persistChatTurn.mock.lastCall![0].messages, inicio };
+      }
+
+      test('la respuesta del modelo se guarda en el mismo turno, con id', async () => {
+        const { guardados } = await turnoCompleto();
+
+        expect(guardados).toHaveLength(2);
+        expect(guardados[1]).toMatchObject({
+          role: 'assistant',
+          messageId: expect.stringMatching(/.+/),
+          parts: expect.arrayContaining([
+            expect.objectContaining({ type: 'text', text: '¿Número de parte?' }),
+          ]),
+        });
+      });
+
+      /**
+       * El turno siguiente el navegador reenvía esta respuesta con el `id` que
+       * le dio `useChat`, y Convex reescribe la fila con ese `id` en vez de
+       * añadir otra. Eso sólo funciona si el `id` que viaja al navegador es el
+       * mismo que se guardó.
+       */
+      test('el id guardado es el mismo que recibe el navegador', async () => {
+        const { guardados, inicio } = await turnoCompleto();
+
+        expect(inicio?.messageId).toBe(guardados[1].messageId);
+      });
+
+      /**
+       * El caso por el que existe todo esto: el turno que envía. Lo guardado
+       * tiene que cerrar la conversación por sí solo, porque al recargar es lo
+       * único que el navegador tiene para reenviar, y la ruta decide el 409
+       * sobre lo que el navegador reenvía.
+       */
+      test('el turno que envía se guarda, y lo guardado cierra la conversación', async () => {
+        createReplacementRequest.mockResolvedValue({
+          quoteId: 'quote_1',
+          requestId: 'REQ-ABC123',
+          products: [],
+          customer: { fullName: 'Ana', companyName: 'ACME', email: 'ana@example.com' },
+          subtotalUSD: 0,
+          taxUSD: 0,
+          totalUSD: 0,
+        });
+        vi.spyOn(console, 'log').mockImplementation(() => {});
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const modelo = modeloQueContesta(
+          llamada('submit_quote_request', {
+            products: [
+              { partNumber: '162562', model: 'GR45C', quantity: 1, deliveryLocation: 'Monterrey' },
+            ],
+          }),
+          texto('Gracias, que tenga buen día.')
+        );
+
+        const { guardados } = await turnoCompleto(modelo);
+        const envio = findSubmission(toTranscriptMessages(guardados));
+
+        expect(envio).toEqual({ quoteId: 'quote_1', messageId: guardados[1].messageId });
+
+        // Recargar y seguir escribiendo: el navegador reenvía lo guardado más
+        // un mensaje nuevo, y eso no llega al modelo.
+        streamText.mockClear();
+        const POST = await loadHandler();
+        const res = await POST(
+          request('es', [
+            ...toTranscriptMessages(guardados),
+            { id: 'm3', role: 'user', parts: [{ type: 'text', text: 'y también otro' }] },
+          ])
+        );
+
+        expect(res.status).toBe(409);
+        expect(streamText).not.toHaveBeenCalled();
+        expect(createReplacementRequest).toHaveBeenCalledTimes(1);
+      });
+
+      test('cada respuesta estrena id', async () => {
+        const primero = await turnoCompleto();
+        const segundo = await turnoCompleto();
+
+        expect(primero.guardados[1].messageId).not.toBe(segundo.guardados[1].messageId);
+      });
     });
 
     /**
