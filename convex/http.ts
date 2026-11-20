@@ -44,6 +44,7 @@ http.route({
     ctx.runMutation(internal.quotes.create, {
       clerkId: body.clerkId,
       products: body.products,
+      messageIds: body.messageIds,
     })
   ),
 });

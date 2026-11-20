@@ -7,6 +7,7 @@ import { drawSuggestedPrice, matchPricingRule } from './lib/pricing';
 import { SUGGESTED_DELIVERY_WEEKS } from './lib/delivery';
 import { allocateRequestId } from './lib/request_id';
 import { customerView } from './lib/customer_view';
+import { closeConversation, conversationToClose } from './chat';
 import type { Doc } from './_generated/dataModel';
 import type { MutationCtx } from './_generated/server';
 
@@ -29,6 +30,12 @@ export const create = internalMutation({
         deliveryLocation: v.string(),
       })
     ),
+    /**
+     * Los ids del transcript con el que el Customer pidió esta Request (ticket
+     * 03). Con ellos se cierra, en esta misma transacción, la conversación a la
+     * que pertenecen, y se niega la Request si esa conversación ya envió una.
+     */
+    messageIds: v.array(v.string()),
   },
   handler: async (ctx, args) => {
     // 1. Get the user from clerkId
@@ -40,6 +47,12 @@ export const create = internalMutation({
     if (!user) {
       throw new Error('Usuario no encontrado en la base de datos.');
     }
+
+    // Antes de crear nada: si estos mensajes continúan una conversación que ya
+    // envió su Request, se lanza y no se crea otra (ticket 03). Lanzar es lo
+    // que hace que la herramienta del chat conteste `success: false` y no
+    // avise al Approver.
+    const conversation = await conversationToClose(ctx, user._id, args.messageIds);
 
     // 2. Leer la configuración: la tabla es pequeña y cabe en memoria.
     const pricingRules = await ctx.db.query('pricing_rules').collect();
@@ -70,6 +83,10 @@ export const create = internalMutation({
       products: processedProducts,
       expiresAt,
     });
+
+    if (conversation !== null) {
+      await closeConversation(ctx, conversation._id, quoteId);
+    }
 
     return {
       quoteId,

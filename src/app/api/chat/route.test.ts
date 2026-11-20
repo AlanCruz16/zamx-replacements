@@ -647,6 +647,46 @@ describe('POST /api/chat', () => {
       expect(log).not.toHaveBeenCalledWith('Email sent successfully via Resend');
     });
 
+    /**
+     * Ticket 03: con los ids, Convex cierra en la misma transacción la
+     * conversación que esos mensajes continúan, y se niega si ya está cerrada.
+     */
+    test('pasa los ids del transcript con los productos', async () => {
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await enviarSolicitud();
+
+      expect(createReplacementRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ clerkId: 'user_ana', messageIds: ['m1'] })
+      );
+    });
+
+    test('si Convex se niega por una conversación ya enviada, falla sin avisar al Approver', async () => {
+      vi.stubEnv('ADMIN_EMAIL', 'ventas@example.com');
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      consumeChatRateLimit.mockResolvedValue({ allowed: true });
+      createReplacementRequest.mockRejectedValue(
+        new Error('La conversación ya envió su Replacement Request.')
+      );
+      const POST = await loadHandler();
+      await POST(request());
+
+      const [{ tools }] = streamText.mock.calls[0];
+      const resultado = await tools.submit_quote_request.execute(
+        {
+          products: [
+            { partNumber: 'P-001', model: 'MK137', quantity: 1, deliveryLocation: 'Monterrey' },
+          ],
+        },
+        { toolCallId: 't1', messages: [] }
+      );
+
+      expect(resultado).toMatchObject({ success: false });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
     test('sin ADMIN_EMAIL no se manda a nadie y se dice por qué', async () => {
       vi.stubEnv('ADMIN_EMAIL', '');
       const error = vi.spyOn(console, 'error').mockImplementation(() => {});

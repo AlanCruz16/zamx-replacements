@@ -4,10 +4,11 @@ import {
   internalQuery,
   mutation,
   query,
+  type MutationCtx,
   type QueryCtx,
 } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { findSubmission, toTranscriptMessages } from './lib/chat';
+import { findSubmission, toTranscriptMessages, type Submission } from './lib/chat';
 
 /**
  * Dónde vive una conversación del chat entre una pestaña y la siguiente
@@ -124,7 +125,20 @@ async function continuesAnySubmitted(
   userId: Id<'users'>,
   messageIds: readonly string[]
 ): Promise<boolean> {
-  const checked = new Map<Id<'chat_sessions'>, boolean>();
+  return (await conversationsContinuedBy(ctx, userId, messageIds)).some(isSubmitted);
+}
+
+/**
+ * Las conversaciones de este Customer que un transcript continúa: las que ya
+ * guardan alguno de sus mensajes. Lo de otro Customer no aparece, así que un id
+ * guardado en una conversación ajena cuenta igual que uno que no existe.
+ */
+async function conversationsContinuedBy(
+  ctx: QueryCtx,
+  userId: Id<'users'>,
+  messageIds: readonly string[]
+): Promise<Doc<'chat_sessions'>[]> {
+  const found = new Map<Id<'chat_sessions'>, Doc<'chat_sessions'> | null>();
 
   for (const messageId of new Set(messageIds)) {
     const rows = await ctx.db
@@ -135,17 +149,102 @@ async function continuesAnySubmitted(
       .take(ROWS_PER_MESSAGE_ID);
 
     for (const { sessionId } of rows) {
-      let closed = checked.get(sessionId);
-      if (closed === undefined) {
-        const session = await ctx.db.get(sessionId);
-        closed = session !== null && session.userId === userId && isSubmitted(session);
-        checked.set(sessionId, closed);
-      }
-      if (closed) return true;
+      if (found.has(sessionId)) continue;
+      const session = await ctx.db.get(sessionId);
+      found.set(sessionId, session !== null && session.userId === userId ? session : null);
     }
   }
 
-  return false;
+  return [...found.values()].filter((s): s is Doc<'chat_sessions'> => s !== null);
+}
+
+/**
+ * Ticket 03: la conversación que se cierra con la Replacement Request que se
+ * está creando, en la misma transacción que la crea.
+ *
+ * Antes la conversación sólo contaba como enviada cuando `persistTurn` guardaba
+ * el turno, al acabar el stream. Un mensaje que llegaba en ese hueco —una
+ * recarga temprana, una segunda pestaña, un doble envío— pasaba el 409, y el
+ * modelo podía crear otra Request y mandar otro correo al Approver. Ahora
+ * `quotes.create` la pide antes de insertar y la cierra después: como Convex
+ * corre cada mutación como una transacción serializable, de dos envíos que
+ * compiten sólo el primero crea la Request, y el segundo encuentra la
+ * conversación cerrada.
+ *
+ * Lanza si los ids continúan una conversación ya enviada de este Customer —la
+ * misma regla del ticket 02—. Si no, devuelve la conversación a la que
+ * pertenecen esos ids, o `null` si todavía no hay ninguna guardada: un envío en
+ * el primer turno, que `persistTurn` cierra al crearla. Se cierra la de los ids
+ * y no «la abierta», porque dos envíos que compiten verían los dos la misma
+ * abierta, y en el primer turno no hay ninguna.
+ */
+export async function conversationToClose(
+  ctx: QueryCtx,
+  userId: Id<'users'>,
+  messageIds: readonly string[]
+): Promise<Doc<'chat_sessions'> | null> {
+  const continued = await conversationsContinuedBy(ctx, userId, messageIds);
+  if (continued.some(isSubmitted)) {
+    throw new Error(ALREADY_SUBMITTED);
+  }
+
+  // Un id vive en una sola conversación; si una pestaña vieja los repartió en
+  // varias, la más reciente es la que el Customer tiene delante.
+  return continued.reduce<Doc<'chat_sessions'> | null>(
+    (latest, s) => (latest === null || s._creationTime > latest._creationTime ? s : latest),
+    null
+  );
+}
+
+/** Cierra una conversación con la Replacement Request que produjo. */
+export async function closeConversation(
+  ctx: MutationCtx,
+  sessionId: Id<'chat_sessions'>,
+  quoteId: Id<'quotes'>
+): Promise<void> {
+  await ctx.db.patch(sessionId, { submittedAt: Date.now(), submittedQuoteId: quoteId });
+}
+
+/** Por qué se niega lo que intenta continuar una conversación ya enviada. */
+const ALREADY_SUBMITTED = 'La conversación ya envió su Replacement Request.';
+
+/**
+ * La conversación que cerró el turno que se está guardando, si es eso lo que
+ * llega.
+ *
+ * Desde el ticket 03 la conversación se cierra al crearse la Replacement
+ * Request, antes de que el turno que la crea termine de guardarse. Ese turno
+ * continúa entonces una conversación ya enviada, y la regla del ticket 02 lo
+ * rechazaría: la respuesta del modelo se perdería otra vez (ticket 01).
+ *
+ * Se le deja pasar sólo a él. Lo reconoce el envío que trae: nombra la
+ * Replacement Request con la que se cerró la conversación, y el mensaje que lo
+ * lleva todavía no está guardado en ella. Un reenvío de la conversación ya
+ * guardada trae el mismo envío, pero con ese mensaje ya dentro, y se sigue
+ * rechazando; el turno que perdió la carrera no trae ningún envío con éxito, o
+ * trae otro.
+ */
+async function closedByThisTurn(
+  ctx: QueryCtx,
+  submitted: readonly Doc<'chat_sessions'>[],
+  submission: Submission | undefined
+): Promise<Doc<'chat_sessions'> | null> {
+  if (submitted.length !== 1 || submission === undefined) return null;
+
+  const [session] = submitted;
+  if (session.submittedQuoteId === undefined || submission.quoteId !== session.submittedQuoteId) {
+    return null;
+  }
+
+  const { messageId } = submission;
+  if (messageId === undefined) return null;
+
+  const stored = await ctx.db
+    .query('chat_messages')
+    .withIndex('by_message_id', (q) => q.eq('messageId', messageId))
+    .take(ROWS_PER_MESSAGE_ID);
+
+  return stored.some((m) => m.sessionId === session._id) ? null : session;
 }
 
 /** Los mensajes de una conversación, en el orden en que se dijeron. */
@@ -317,17 +416,23 @@ export const persistTurn = internalMutation({
     //
     // La ruta aplica esta misma regla antes de llamar al modelo, así que llegar
     // aquí es un error, no un caso que haya que absorber en silencio.
-    if (
-      await continuesAnySubmitted(
+    //
+    // La excepción es el turno que la cerró (ticket 03): `quotes.create` cierra
+    // la conversación antes de que ese turno termine de guardarse.
+    const submission = findSubmission(toTranscriptMessages(args.messages));
+    const submitted = (
+      await conversationsContinuedBy(
         ctx,
         user._id,
         args.messages.map((m) => m.messageId)
       )
-    ) {
-      throw new Error('La conversación ya envió su Replacement Request.');
+    ).filter(isSubmitted);
+    const closedByTurn = await closedByThisTurn(ctx, submitted, submission);
+
+    if (submitted.length > 0 && closedByTurn === null) {
+      throw new Error(ALREADY_SUBMITTED);
     }
 
-    const submission = findSubmission(toTranscriptMessages(args.messages));
     const now = Date.now();
     const latest = await latestSession(ctx, user._id);
     const open = openSession(latest);
@@ -355,6 +460,7 @@ export const persistTurn = internalMutation({
       abandoned !== null && (await continues(ctx, abandoned._id, args.messages)) ? abandoned : null;
 
     const sessionId =
+      closedByTurn?._id ??
       open?._id ??
       inFlight?._id ??
       (await ctx.db.insert('chat_sessions', { userId: user._id, lastMessageAt: now }));
@@ -372,7 +478,9 @@ export const persistTurn = internalMutation({
 
     await ctx.db.patch(sessionId, { lastMessageAt: now });
 
-    if (submission === undefined) return null;
+    // Ya cerrada con su Replacement Request al crearse ésta: no hay nada más
+    // que apuntar, y reescribir `submittedAt` movería la hora del envío.
+    if (submission === undefined || closedByTurn !== null) return null;
 
     // El identificador viene dentro de la salida de una herramienta, es decir
     // de texto que viajó por la red. Se apunta sólo si nombra una Replacement

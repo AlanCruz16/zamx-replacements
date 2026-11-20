@@ -95,7 +95,11 @@ export async function POST(req: Request) {
     return conversationAlreadySubmitted(language);
   }
 
-  // Lo de arriba sólo ve la copia del navegador, y esa copia puede no traer el
+  // Los ids de este transcript. Los usan las dos preguntas a Convex: si
+  // continúa una conversación enviada, y cuál cerrar si el modelo envía.
+  const messageIds = toStoredMessages(messages ?? []).map((m) => m.messageId);
+
+  // `findSubmission` sólo ve la copia del navegador, y esa copia puede no traer el
   // envío: una pestaña que no lo vio, un cuerpo editado, una recarga que llegó
   // antes de que el turno que envía terminara de guardarse. Así que también se
   // le pregunta a Convex si alguno de estos mensajes ya está guardado en una
@@ -103,10 +107,7 @@ export async function POST(req: Request) {
   // `persistTurn` se niega a guardar, de modo que no pueden discrepar.
   let continuesSubmitted;
   try {
-    continuesSubmitted = await continuesSubmittedConversation(
-      clerkId,
-      toStoredMessages(messages ?? []).map((m) => m.messageId)
-    );
+    continuesSubmitted = await continuesSubmittedConversation(clerkId, messageIds);
   } catch (error) {
     // Como con el límite: si no se puede saber, no se llama al modelo.
     console.error('No se pudo comprobar si la conversación ya se envió:', error);
@@ -183,8 +184,12 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
           }
 
           try {
-            // 1. Guardar la cotización en Convex
-            const result = await createReplacementRequest({ clerkId, products });
+            // 1. Guardar la cotización en Convex. Con los ids, Convex cierra en
+            // la misma transacción la conversación que continúan, y se niega
+            // si ya está cerrada: de dos envíos que compiten —una recarga
+            // temprana, otra pestaña— sólo uno crea la Request (ticket 03). La
+            // negativa lanza, y cae en el `success: false` de abajo, sin correo.
+            const result = await createReplacementRequest({ clerkId, products, messageIds });
 
             // 2. Enviar el email con Resend. Resend no lanza cuando rechaza un
             // envío: devuelve `{ error }`. Sin mirarlo, un dominio sin verificar

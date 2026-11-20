@@ -101,7 +101,7 @@ async function seed(t: TestConvex) {
  * de Convex, y el secreto se comprueba en la frontera HTTP.
  */
 function createQuote(t: TestConvex, clerkId: string, products = [PRODUCT]) {
-  return t.mutation(internal.quotes.create, { clerkId, products });
+  return t.mutation(internal.quotes.create, { clerkId, products, messageIds: [] });
 }
 
 /** Afirma que un Suggested Price cae dentro del rango de la regla sembrada. */
@@ -984,7 +984,7 @@ describe('la frontera HTTP interna distingue la mala configuración de la denega
     return {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({ clerkId, products: [PRODUCT] }),
+      body: JSON.stringify({ clerkId, products: [PRODUCT], messageIds: [] }),
     };
   }
 
