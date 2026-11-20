@@ -1,4 +1,11 @@
-import { streamText, tool, convertToModelMessages, type UIMessage, stepCountIs } from 'ai';
+import {
+  streamText,
+  tool,
+  convertToModelMessages,
+  createIdGenerator,
+  type UIMessage,
+  stepCountIs,
+} from 'ai';
 import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
 import { Resend } from 'resend';
@@ -14,6 +21,9 @@ import { messagesFor, resolveLanguage, type Language } from '@/lib/messages';
 import { findSubmission, toStoredMessages } from '../../../../convex/lib/chat';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
+
+/** El `id` de cada respuesta del modelo, que es el que se guarda y el que recibe el navegador. */
+const generateMessageId = createIdGenerator({ prefix: 'msg', size: 16 });
 
 // Configura el tiempo máximo de espera para la API (útil en Edge)
 export const maxDuration = 30;
@@ -231,10 +241,14 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
   // Return a UI Message Stream response (SSE/data protocol).
   // This is required for useChat's DefaultChatTransport to parse the stream correctly.
   return result.toUIMessageStreamResponse({
-    // Pasarle los mensajes originales es lo que hace que el SDK le ponga `id`
-    // al mensaje de respuesta. Sin ese `id` no hay con qué reconciliar el turno
-    // siguiente contra lo ya guardado, y cada reenvío dejaría copias.
+    // Con los mensajes originales, `onFinish` recibe el transcript entero. El
+    // `id` de la respuesta lo pone `generateMessageId`: sin él llega vacío y
+    // `toStoredMessages` la descarta, así que el turno que crea la Replacement
+    // Request no se guardaría nunca. El mismo `id` viaja al navegador en el
+    // chunk `start`, y cuando `useChat` reenvía esta respuesta el turno
+    // siguiente, Convex reescribe su fila en vez de copiarla.
     originalMessages: messages as UIMessage[],
+    generateMessageId,
     onFinish: async ({ messages: transcript }) => {
       try {
         await persistChatTurn({ clerkId, messages: toStoredMessages(transcript) });
