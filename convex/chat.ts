@@ -153,6 +153,19 @@ async function conversationsContinuedBy(
       const session = await ctx.db.get(sessionId);
       found.set(sessionId, session !== null && session.userId === userId ? session : null);
     }
+
+    // La conversación que reservó un envío del primer turno (ticket 04) y cuyo
+    // turno todavía no se guarda: aún no tiene mensajes que la delaten. Leer
+    // este rango es además lo que hace chocar a dos envíos que compiten.
+    // Hay a lo sumo una por id: la crea sólo el envío que gana la carrera.
+    const reserved = await ctx.db
+      .query('chat_sessions')
+      .withIndex('by_user_id_and_opening_message_id', (q) =>
+        q.eq('userId', userId).eq('openingMessageId', messageId)
+      )
+      .first();
+
+    if (reserved !== null) found.set(reserved._id, reserved);
   }
 
   return [...found.values()].filter((s): s is Doc<'chat_sessions'> => s !== null);
@@ -174,9 +187,11 @@ async function conversationsContinuedBy(
  * Lanza si los ids continúan una conversación ya enviada de este Customer —la
  * misma regla del ticket 02—. Si no, devuelve la conversación a la que
  * pertenecen esos ids, o `null` si todavía no hay ninguna guardada: un envío en
- * el primer turno, que `persistTurn` cierra al crearla. Se cierra la de los ids
- * y no «la abierta», porque dos envíos que compiten verían los dos la misma
- * abierta, y en el primer turno no hay ninguna.
+ * el primer turno, para el que `closeConversation` la crea ya cerrada (ticket
+ * 04). Una conversación así reservada cuenta como de esos ids aunque todavía no
+ * guarde ningún mensaje. Se cierra la de los ids y no «la abierta», porque dos
+ * envíos que compiten verían los dos la misma abierta, y en el primer turno no
+ * hay ninguna.
  */
 export async function conversationToClose(
   ctx: QueryCtx,
@@ -196,13 +211,39 @@ export async function conversationToClose(
   );
 }
 
-/** Cierra una conversación con la Replacement Request que produjo. */
+/**
+ * Cierra con la Replacement Request que produjo la conversación que devolvió
+ * `conversationToClose`.
+ *
+ * Si no había ninguna guardada —un envío en el primer turno— la crea ya
+ * cerrada, reservada con el primer id del transcript (ticket 04). Sin la
+ * reserva, dos envíos del primer turno que compiten no leían nada en común y
+ * creaban dos Requests. Con ella, el segundo lee el rango que el primero
+ * escribió, choca, y al reintentarse `conversationToClose` lo rechaza.
+ * `persistTurn` guarda después el turno en esta misma conversación.
+ *
+ * Sin ids no hay qué reservar ni con qué encontrarla después, así que no se
+ * crea nada.
+ */
 export async function closeConversation(
   ctx: MutationCtx,
-  sessionId: Id<'chat_sessions'>,
+  userId: Id<'users'>,
+  conversation: Doc<'chat_sessions'> | null,
+  messageIds: readonly string[],
   quoteId: Id<'quotes'>
 ): Promise<void> {
-  await ctx.db.patch(sessionId, { submittedAt: Date.now(), submittedQuoteId: quoteId });
+  const now = Date.now();
+  const closed = { submittedAt: now, submittedQuoteId: quoteId };
+
+  if (conversation !== null) {
+    await ctx.db.patch(conversation._id, closed);
+    return;
+  }
+
+  const [openingMessageId] = messageIds;
+  if (openingMessageId === undefined) return;
+
+  await ctx.db.insert('chat_sessions', { userId, lastMessageAt: now, openingMessageId, ...closed });
 }
 
 /** Por qué se niega lo que intenta continuar una conversación ya enviada. */

@@ -122,7 +122,17 @@ export default defineSchema({
     submittedAt: v.optional(v.number()),
     submittedQuoteId: v.optional(v.id('quotes')),
     abandonedAt: v.optional(v.number()),
-  }).index('by_user_id', ['userId']),
+    /**
+     * El id del primer mensaje del transcript con el que se creó esta
+     * conversación al crearse su Replacement Request, cuando todavía no había
+     * nada guardado (ticket 04). Es la reserva: dos envíos del primer turno que
+     * compiten leen el mismo rango de este índice, así que sólo uno la crea.
+     * Ausente en las que abrió `persistTurn`.
+     */
+    openingMessageId: v.optional(v.string()),
+  })
+    .index('by_user_id', ['userId'])
+    .index('by_user_id_and_opening_message_id', ['userId', 'openingMessageId']),
 
   /**
    * Mensajes del chat. Se guarda `parts[]` tal cual lo produce el AI SDK v6 —

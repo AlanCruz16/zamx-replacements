@@ -96,6 +96,30 @@ async function seedQuote(t: TestConvex, clerkId: string) {
   });
 }
 
+/** Crea una Replacement Request por el camino del chat, con los ids del transcript. */
+function createQuote(t: TestConvex, clerkId: string, messageIds: string[]) {
+  return t.mutation(internal.quotes.create, {
+    clerkId,
+    products: [
+      {
+        partNumber: '162562',
+        model: 'GR45C-4DK.4F.CR',
+        quantity: 1,
+        deliveryLocation: 'Monterrey',
+      },
+    ],
+    messageIds,
+  });
+}
+
+function continuesSubmitted(t: TestConvex, clerkId: string, messageIds: string[]) {
+  return t.query(internal.chat.continuesSubmittedConversation, { clerkId, messageIds });
+}
+
+async function sesiones(t: TestConvex) {
+  return await t.run(async (ctx) => ctx.db.query('chat_sessions').collect());
+}
+
 describe('un Customer reanuda su propia conversación', () => {
   test('sin conversación previa no hay nada que reanudar', async () => {
     const t = convexTest(schema, modules);
@@ -506,10 +530,6 @@ describe('un transcript que continúa una conversación enviada se rechaza', () 
     return ana;
   }
 
-  function continuesSubmitted(t: TestConvex, clerkId: string, messageIds: string[]) {
-    return t.query(internal.chat.continuesSubmittedConversation, { clerkId, messageIds });
-  }
-
   test('una pestaña que no vio el envío: sus mensajes están en una conversación enviada', async () => {
     const t = convexTest(schema, modules);
     const ana = await anaYaEnvio(t);
@@ -632,25 +652,6 @@ describe('un transcript que continúa una conversación enviada se rechaza', () 
  * el modelo podía crear otra Replacement Request.
  */
 describe('la Replacement Request cierra su conversación en el momento en que se crea', () => {
-  const PRODUCT = {
-    partNumber: '162562',
-    model: 'GR45C-4DK.4F.CR',
-    quantity: 1,
-    deliveryLocation: 'Monterrey',
-  };
-
-  function createQuote(t: TestConvex, clerkId: string, messageIds: string[]) {
-    return t.mutation(internal.quotes.create, { clerkId, products: [PRODUCT], messageIds });
-  }
-
-  function continuesSubmitted(t: TestConvex, clerkId: string, messageIds: string[]) {
-    return t.query(internal.chat.continuesSubmittedConversation, { clerkId, messageIds });
-  }
-
-  async function sesiones(t: TestConvex) {
-    return await t.run(async (ctx) => ctx.db.query('chat_sessions').collect());
-  }
-
   /** Ana tiene una conversación abierta con `msg_1` guardado. */
   async function anaConversando(t: TestConvex) {
     const ana = await seedCustomer(t, 'user_ana', 'Ana');
@@ -801,7 +802,6 @@ describe('la Replacement Request cierra su conversación en el momento en que se
     const ana = await seedCustomer(t, 'user_ana', 'Ana');
 
     const { quoteId } = await createQuote(t, ana, ['msg_1']);
-    expect(await sesiones(t)).toEqual([]);
 
     await t.mutation(internal.chat.persistTurn, {
       clerkId: ana,
@@ -822,9 +822,121 @@ describe('la Replacement Request cierra su conversación en el momento en que se
     await createQuote(t, beto, ['msg_1']);
     expect((await sesiones(t))[0].submittedAt).toBeUndefined();
 
-    // Ana envía; los mismos ids no le impiden a Beto crear la suya.
+    // Ana envía; los mismos ids no le impiden a otro Customer crear la suya.
     await createQuote(t, ana, ['msg_1']);
-    await expect(createQuote(t, beto, ['msg_1'])).resolves.toMatchObject({
+    const carla = await seedCustomer(t, 'user_carla', 'Carla');
+    await expect(createQuote(t, carla, ['msg_1'])).resolves.toMatchObject({
+      requestId: expect.any(String),
+    });
+  });
+});
+
+/**
+ * Ticket 04 — un doble envío en el primer turno de una conversación crea una
+ * sola Replacement Request.
+ *
+ * En el primer turno no hay nada guardado todavía, así que el cierre del
+ * ticket 03 no tenía qué cerrar: dos peticiones que competían —un doble envío,
+ * una segunda pestaña, el modelo llamando dos veces a `submit_quote_request`—
+ * no leían nada en común y creaban dos Requests y dos correos al Approver.
+ */
+describe('un doble envío en el primer turno crea una sola Replacement Request', () => {
+  async function quotes(t: TestConvex) {
+    return await t.run(async (ctx) => ctx.db.query('quotes').collect());
+  }
+
+  test('dos envíos a la vez con el mismo transcript crean una sola Request', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana', 'Ana');
+
+    const resultados = await Promise.allSettled([
+      createQuote(t, ana, ['msg_1']),
+      createQuote(t, ana, ['msg_1']),
+    ]);
+
+    expect(resultados.map((r) => r.status).sort()).toEqual(['fulfilled', 'rejected']);
+    expect(await quotes(t)).toHaveLength(1);
+  });
+
+  test('dos llamadas a la herramienta en la misma respuesta crean una sola Request', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana', 'Ana');
+
+    await createQuote(t, ana, ['msg_1']);
+    await expect(createQuote(t, ana, ['msg_1'])).rejects.toThrow('ya envió su Replacement Request');
+    expect(await quotes(t)).toHaveLength(1);
+  });
+
+  test('la segunda pestaña, que ya trae otro mensaje, también se rechaza', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana', 'Ana');
+
+    await createQuote(t, ana, ['msg_1']);
+    await expect(createQuote(t, ana, ['msg_1', 'msg_3'])).rejects.toThrow(
+      'ya envió su Replacement Request'
+    );
+  });
+
+  test('con la Request creada y el turno sin guardar, continuar ya se rechaza', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana', 'Ana');
+
+    await createQuote(t, ana, ['msg_1']);
+
+    expect(await continuesSubmitted(t, ana, ['msg_1', 'msg_3'])).toBe(true);
+  });
+
+  test('el turno que envía se guarda entero en la conversación que su Request cerró', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana', 'Ana');
+
+    const { quoteId } = await createQuote(t, ana, ['msg_1']);
+    const [reservada] = await sesiones(t);
+    expect(reservada.submittedQuoteId).toBe(quoteId);
+
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'todo de golpe'), submittedTurn('msg_2', quoteId)],
+    });
+
+    const todas = await sesiones(t);
+    expect(todas).toHaveLength(1);
+    expect(todas[0]._id).toBe(reservada._id);
+    expect(todas[0].submittedQuoteId).toBe(quoteId);
+    expect(todas[0].submittedAt).toBe(reservada.submittedAt);
+
+    const conversacion = await t
+      .withIdentity({ subject: ana })
+      .query(api.chat.currentConversation, {});
+    expect(conversacion!.messages.map((m) => m.id)).toEqual(['msg_1', 'msg_2']);
+    expect(findSubmission(conversacion!.messages)).toEqual({ quoteId, messageId: 'msg_2' });
+  });
+
+  test('el turno del envío que perdió la carrera no se guarda', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana', 'Ana');
+    await createQuote(t, ana, ['msg_1']);
+
+    await expect(
+      t.mutation(internal.chat.persistTurn, {
+        clerkId: ana,
+        messages: [
+          textTurn('msg_1', 'user', 'todo de golpe'),
+          textTurn('msg_4', 'assistant', 'Hubo un error.'),
+        ],
+      })
+    ).rejects.toThrow('ya envió su Replacement Request');
+  });
+
+  test('la reserva de otro Customer con los mismos ids no bloquea a éste', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana', 'Ana');
+    const beto = await seedCustomer(t, 'user_beto', 'Beto');
+
+    await createQuote(t, beto, ['msg_1']);
+
+    expect(await continuesSubmitted(t, ana, ['msg_1'])).toBe(false);
+    await expect(createQuote(t, ana, ['msg_1'])).resolves.toMatchObject({
       requestId: expect.any(String),
     });
   });

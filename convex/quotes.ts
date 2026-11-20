@@ -84,9 +84,7 @@ export const create = internalMutation({
       expiresAt,
     });
 
-    if (conversation !== null) {
-      await closeConversation(ctx, conversation._id, quoteId);
-    }
+    await closeConversation(ctx, user._id, conversation, args.messageIds, quoteId);
 
     return {
       quoteId,
