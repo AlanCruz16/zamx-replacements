@@ -88,6 +88,17 @@ http.route({
 });
 
 http.route({
+  path: '/internal/chat/continues-submitted',
+  method: 'POST',
+  handler: internalRoute((body, ctx) =>
+    ctx.runQuery(internal.chat.continuesSubmittedConversation, {
+      clerkId: body.clerkId,
+      messageIds: body.messageIds,
+    })
+  ),
+});
+
+http.route({
   path: '/internal/rate-limit/consume',
   method: 'POST',
   handler: internalRoute((body, ctx) =>

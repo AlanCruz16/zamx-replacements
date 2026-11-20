@@ -108,3 +108,15 @@ export function persistChatTurn(
 ): Promise<FunctionReturnType<typeof internal.chat.persistTurn>> {
   return callInternalConvex('/internal/chat/persist-turn', args);
 }
+
+/**
+ * Si alguno de estos mensajes ya está guardado en una conversación enviada de
+ * este Customer. La ruta del chat lo pregunta antes de llamar al modelo: la
+ * copia que manda el navegador puede no traer el envío, y lo guardado sí.
+ */
+export function continuesSubmittedConversation(
+  clerkId: string,
+  messageIds: string[]
+): Promise<FunctionReturnType<typeof internal.chat.continuesSubmittedConversation>> {
+  return callInternalConvex('/internal/chat/continues-submitted', { clerkId, messageIds });
+}

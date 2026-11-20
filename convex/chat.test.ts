@@ -484,6 +484,144 @@ describe('una conversación que ya envió su Replacement Request queda de solo l
 });
 
 /**
+ * Ticket 02 — lo que cierra una conversación es lo que está guardado, no la
+ * copia que trae el navegador.
+ *
+ * Mirar sólo el transcript que llega deja pasar tres casos: una pestaña que se
+ * quedó abierta desde antes del envío, un cuerpo editado al que le quitaron la
+ * respuesta que envió, y una recarga que llegó antes de que el turno que envía
+ * terminara de guardarse. En los tres, el transcript trae mensajes que ya están
+ * guardados en una conversación enviada, y eso es lo que se comprueba.
+ */
+describe('un transcript que continúa una conversación enviada se rechaza', () => {
+  /** Ana envía una conversación con `msg_1` y `msg_2`. */
+  async function anaYaEnvio(t: TestConvex) {
+    const ana = await seedCustomer(t, 'user_ana', 'Ana');
+    const quoteId = await seedQuote(t, ana);
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'confirmo'), submittedTurn('msg_2', quoteId)],
+    });
+    return ana;
+  }
+
+  function continuesSubmitted(t: TestConvex, clerkId: string, messageIds: string[]) {
+    return t.query(internal.chat.continuesSubmittedConversation, { clerkId, messageIds });
+  }
+
+  test('una pestaña que no vio el envío: sus mensajes están en una conversación enviada', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await anaYaEnvio(t);
+
+    expect(await continuesSubmitted(t, ana, ['msg_1', 'msg_3'])).toBe(true);
+  });
+
+  test('un cuerpo editado sin la respuesta que envió se rechaza al guardarse', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await anaYaEnvio(t);
+
+    await expect(
+      t.mutation(internal.chat.persistTurn, {
+        clerkId: ana,
+        messages: [
+          textTurn('msg_1', 'user', 'confirmo'),
+          textTurn('msg_3', 'user', 'y también otro ventilador'),
+        ],
+      })
+    ).rejects.toThrow('ya envió su Replacement Request');
+
+    const mensajes = await t.run(async (ctx) => ctx.db.query('chat_messages').collect());
+    expect(mensajes.map((m) => m.messageId)).toEqual(['msg_1', 'msg_2']);
+  });
+
+  /**
+   * Cuenta cualquier conversación enviada, no sólo la última: con otra ya
+   * abierta, la pestaña vieja sigue siendo la continuación de la enviada. Y
+   * guardar su turno no puede meter sus mensajes en la conversación nueva, que
+   * es donde caería por ser la abierta.
+   */
+  test('con una conversación nueva ya abierta, la pestaña vieja sigue rechazada', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await anaYaEnvio(t);
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_10', 'user', 'otra pieza')],
+    });
+
+    expect(await continuesSubmitted(t, ana, ['msg_1', 'msg_3'])).toBe(true);
+    await expect(
+      t.mutation(internal.chat.persistTurn, {
+        clerkId: ana,
+        messages: [textTurn('msg_1', 'user', 'confirmo'), textTurn('msg_3', 'user', 'y otro')],
+      })
+    ).rejects.toThrow('ya envió su Replacement Request');
+
+    const conversacion = await t
+      .withIdentity({ subject: ana })
+      .query(api.chat.currentConversation, {});
+    expect(conversacion!.messages.map((m) => m.id)).toEqual(['msg_10']);
+  });
+
+  test('un transcript sin mensajes guardados pasa: es una conversación nueva', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await anaYaEnvio(t);
+
+    expect(await continuesSubmitted(t, ana, ['msg_nuevo'])).toBe(false);
+    expect(await continuesSubmitted(t, ana, [])).toBe(false);
+  });
+
+  test('la conversación abierta sigue admitiendo su turno siguiente', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+
+    expect(await continuesSubmitted(t, ana, ['msg_1', 'msg_2'])).toBe(false);
+  });
+
+  test('una conversación abandonada no cuenta como enviada', async () => {
+    const t = convexTest(schema, modules);
+    const ana = await seedCustomer(t, 'user_ana');
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: ana,
+      messages: [textTurn('msg_1', 'user', 'Quiero cotizar el 162562')],
+    });
+    await t.withIdentity({ subject: ana }).mutation(api.chat.abandonCurrentConversation, {});
+
+    expect(await continuesSubmitted(t, ana, ['msg_1'])).toBe(false);
+  });
+
+  /**
+   * Los ids de otro Customer no le dicen nada a éste: ni un rechazo, ni nada
+   * que distinga un id de otro que existe de uno que no existe.
+   */
+  test('los mensajes de otro Customer nunca rechazan a éste', async () => {
+    const t = convexTest(schema, modules);
+    await anaYaEnvio(t);
+    const beto = await seedCustomer(t, 'user_beto', 'Beto');
+
+    expect(await continuesSubmitted(t, beto, ['msg_1', 'msg_2'])).toBe(false);
+    await t.mutation(internal.chat.persistTurn, {
+      clerkId: beto,
+      messages: [textTurn('msg_1', 'user', 'hola')],
+    });
+  });
+
+  test('una identidad sin Customer no continúa nada', async () => {
+    const t = convexTest(schema, modules);
+    await anaYaEnvio(t);
+
+    expect(await continuesSubmitted(t, 'user_nadie', ['msg_1'])).toBe(false);
+  });
+
+  test('la comprobación es interna', () => {
+    expect(chat.continuesSubmittedConversation.isInternal).toBe(true);
+  });
+});
+
+/**
  * El Customer se sale de una conversación que no piensa terminar.
  *
  * Hasta aquí la única salida era enviar la Replacement Request: la pantalla
@@ -764,5 +902,26 @@ describe('la frontera HTTP interna del chat', () => {
 
     expect(res.status).toBe(200);
     expect(await t.run(async (ctx) => ctx.db.query('chat_messages').collect())).toHaveLength(1);
+  });
+
+  test('la comprobación de conversación enviada exige el secreto', async () => {
+    const t = convexTest(schema, modules);
+    await seedCustomer(t, 'user_ana');
+    const consulta = JSON.stringify({ clerkId: 'user_ana', messageIds: ['msg_1'] });
+
+    const sinSecreto = await t.fetch('/internal/chat/continues-submitted', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: consulta,
+    });
+    const conSecreto = await t.fetch('/internal/chat/continues-submitted', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-internal-secret': INTERNAL_SECRET },
+      body: consulta,
+    });
+
+    expect(sinSecreto.status).toBe(401);
+    expect(conSecreto.status).toBe(200);
+    expect(await conSecreto.json()).toEqual({ result: false });
   });
 });

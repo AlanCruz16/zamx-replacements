@@ -1,5 +1,11 @@
 import { v } from 'convex/values';
-import { internalMutation, mutation, query, type QueryCtx } from './_generated/server';
+import {
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type QueryCtx,
+} from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { findSubmission, toTranscriptMessages } from './lib/chat';
 
@@ -87,6 +93,59 @@ async function continues(
 ): Promise<boolean> {
   const saved = new Set((await messagesOf(ctx, sessionId)).map((m) => m.messageId));
   return messages.some((m) => saved.has(m.messageId));
+}
+
+/** Cuántas filas con el mismo `messageId` se miran como mucho. */
+const ROWS_PER_MESSAGE_ID = 8;
+
+/**
+ * Si un transcript continúa alguna conversación **enviada** de este Customer:
+ * alguno de sus mensajes ya está guardado en una conversación con
+ * `submittedAt`.
+ *
+ * Es la regla de solo lectura leída de lo guardado, no de la copia que trae el
+ * navegador, que puede ser vieja (una pestaña que no vio el envío), estar
+ * editada (sin la respuesta que envió) o haberse cargado antes de que el turno
+ * que envía terminara de guardarse (si el envío ya quedó guardado cuando llega
+ * el mensaje siguiente; antes no hay nada guardado que lo diga). La aplican igual la ruta, antes de llamar al
+ * modelo, y `persistTurn`, antes de escribir, para que no puedan discrepar
+ * sobre si una conversación está cerrada.
+ *
+ * Cuenta cualquier conversación enviada, no sólo la última: con otra ya
+ * abierta, la pestaña vieja sigue continuando la enviada, y `persistTurn`
+ * metería sus mensajes en la nueva por ser la abierta.
+ *
+ * Sólo cuenta lo de este Customer. Un id que está guardado en la conversación
+ * de otro contesta lo mismo que uno que no existe, así que preguntar no revela
+ * nada de nadie.
+ */
+async function continuesAnySubmitted(
+  ctx: QueryCtx,
+  userId: Id<'users'>,
+  messageIds: readonly string[]
+): Promise<boolean> {
+  const checked = new Map<Id<'chat_sessions'>, boolean>();
+
+  for (const messageId of new Set(messageIds)) {
+    const rows = await ctx.db
+      .query('chat_messages')
+      .withIndex('by_message_id', (q) => q.eq('messageId', messageId))
+      // Un id vive en una sola conversación; el margen cubre las filas que la
+      // pestaña vieja copió en otra antes de esta regla.
+      .take(ROWS_PER_MESSAGE_ID);
+
+    for (const { sessionId } of rows) {
+      let closed = checked.get(sessionId);
+      if (closed === undefined) {
+        const session = await ctx.db.get(sessionId);
+        closed = session !== null && session.userId === userId && isSubmitted(session);
+        checked.set(sessionId, closed);
+      }
+      if (closed) return true;
+    }
+  }
+
+  return false;
 }
 
 /** Los mensajes de una conversación, en el orden en que se dijeron. */
@@ -201,6 +260,28 @@ export const abandonCurrentConversation = mutation({
 });
 
 /**
+ * Si el transcript que el navegador acaba de mandar continúa una conversación
+ * ya enviada de este Customer. La ruta del chat lo pregunta antes de llamar al
+ * modelo, y responde 409 si la respuesta es sí.
+ *
+ * Es interna porque recibe la identidad como argumento: quien la pasa es el
+ * servidor de Next, que la saca de Clerk, nunca del cuerpo de la petición. Una
+ * identidad sin Customer no tiene conversaciones, así que no continúa ninguna.
+ */
+export const continuesSubmittedConversation = internalQuery({
+  args: {
+    clerkId: v.string(),
+    messageIds: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await userByClerkId(ctx, args.clerkId);
+    if (!user) return false;
+
+    return await continuesAnySubmitted(ctx, user._id, args.messageIds);
+  },
+});
+
+/**
  * Guarda el turno recién terminado y, si en él disparó `submit_quote_request`,
  * cierra la conversación.
  *
@@ -225,27 +306,30 @@ export const persistTurn = internalMutation({
       throw new Error('Usuario no encontrado en la base de datos.');
     }
 
+    // Un transcript que continúa una conversación ya cerrada, traiga o no el
+    // envío: el reenvío de la conversación entera, una pestaña que no vio el
+    // envío, un cuerpo al que le quitaron la respuesta que envió. Guardarlo
+    // metería sus mensajes en la conversación abierta —o abriría otra con las
+    // mismas piezas y, con el envío dentro, la cerraría en el acto—. Se
+    // reconoce por los mensajes ya guardados y no por «la última está
+    // cerrada», porque eso confundiría un envío nuevo y legítimo en el primer
+    // turno de la conversación siguiente con un reenvío.
+    //
+    // La ruta aplica esta misma regla antes de llamar al modelo, así que llegar
+    // aquí es un error, no un caso que haya que absorber en silencio.
+    if (
+      await continuesAnySubmitted(
+        ctx,
+        user._id,
+        args.messages.map((m) => m.messageId)
+      )
+    ) {
+      throw new Error('La conversación ya envió su Replacement Request.');
+    }
+
     const submission = findSubmission(toTranscriptMessages(args.messages));
     const now = Date.now();
     const latest = await latestSession(ctx, user._id);
-
-    // El reenvío de una conversación ya cerrada: el mismo mensaje de envío que
-    // ella guarda vuelve a llegar. Guardarlo abriría otra conversación con las
-    // mismas piezas y la cerraría en el acto, una copia por reenvío. Se
-    // reconoce por el mensaje y no por «hay envío y la última está cerrada»,
-    // porque eso confundiría el reenvío con un envío nuevo y legítimo en el
-    // primer turno de la conversación siguiente.
-    //
-    // No es alcanzable desde la pantalla —el route handler rechaza ese
-    // transcript antes de llegar aquí—, y por eso mismo llegar aquí es un
-    // error, no un caso que haya que absorber en silencio.
-    if (latest !== null && isSubmitted(latest) && submission?.messageId !== undefined) {
-      const before = await messagesOf(ctx, latest._id);
-      if (before.some((m) => m.messageId === submission.messageId)) {
-        throw new Error('La conversación ya envió su Replacement Request.');
-      }
-    }
-
     const open = openSession(latest);
 
     // El turno que terminó después de que el Customer se saliera. El stream

@@ -135,7 +135,14 @@ export default defineSchema({
     messageId: v.string(),
     role: v.union(v.literal('user'), v.literal('assistant'), v.literal('system')),
     parts: v.array(v.any()),
-  }).index('by_session_id', ['sessionId']),
+  })
+    .index('by_session_id', ['sessionId'])
+    /**
+     * De qué conversación es un mensaje, sin saber cuál: así se reconoce un
+     * transcript que continúa una conversación ya enviada aunque el navegador
+     * no traiga en él el envío (ticket 02 de `submitted-chat-reloads-open`).
+     */
+    .index('by_message_id', ['messageId']),
 
   /**
    * Salud del sondeo del buzón (ticket 25). Una sola fila, con lo que hace falta

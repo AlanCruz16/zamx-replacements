@@ -12,6 +12,7 @@ import { Resend } from 'resend';
 import { QuoteRequestTemplate } from '@/emails/QuoteRequestTemplate';
 import {
   consumeChatRateLimit,
+  continuesSubmittedConversation,
   createReplacementRequest,
   persistChatTurn,
 } from '@/lib/internal-api';
@@ -91,6 +92,28 @@ export async function POST(req: Request) {
   // comprobación, reenviar una conversación enviada haría que la herramienta
   // disparase por segunda vez sobre las mismas piezas.
   if (findSubmission(messages ?? []) !== undefined) {
+    return conversationAlreadySubmitted(language);
+  }
+
+  // Lo de arriba sólo ve la copia del navegador, y esa copia puede no traer el
+  // envío: una pestaña que no lo vio, un cuerpo editado, una recarga que llegó
+  // antes de que el turno que envía terminara de guardarse. Así que también se
+  // le pregunta a Convex si alguno de estos mensajes ya está guardado en una
+  // conversación enviada de este Customer. Es la misma regla con la que
+  // `persistTurn` se niega a guardar, de modo que no pueden discrepar.
+  let continuesSubmitted;
+  try {
+    continuesSubmitted = await continuesSubmittedConversation(
+      clerkId,
+      toStoredMessages(messages ?? []).map((m) => m.messageId)
+    );
+  } catch (error) {
+    // Como con el límite: si no se puede saber, no se llama al modelo.
+    console.error('No se pudo comprobar si la conversación ya se envió:', error);
+    return new Response(messagesFor(language).chatErrors.unavailable, { status: 503 });
+  }
+
+  if (continuesSubmitted) {
     return conversationAlreadySubmitted(language);
   }
 

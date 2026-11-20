@@ -21,6 +21,7 @@ const {
   authMock,
   consumeChatRateLimit,
   persistChatTurn,
+  continuesSubmittedConversation,
   streamText,
   createReplacementRequest,
   sendEmail,
@@ -28,6 +29,7 @@ const {
   authMock: vi.fn(),
   consumeChatRateLimit: vi.fn(),
   persistChatTurn: vi.fn(),
+  continuesSubmittedConversation: vi.fn(),
   streamText: vi.fn(),
   createReplacementRequest: vi.fn(),
   sendEmail: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock('@clerk/nextjs/server', () => ({ auth: authMock }));
 vi.mock('@/lib/internal-api', () => ({
   consumeChatRateLimit,
   persistChatTurn,
+  continuesSubmittedConversation,
   createReplacementRequest,
 }));
 
@@ -142,6 +145,7 @@ beforeEach(() => {
   vi.stubEnv('RESEND_API_KEY', 're_prueba');
   vi.stubEnv('GOOGLE_GENERATIVE_AI_API_KEY', 'clave-de-prueba');
   authMock.mockResolvedValue({ userId: 'user_ana' });
+  continuesSubmittedConversation.mockResolvedValue(false);
   streamText.mockReturnValue({
     toUIMessageStreamResponse: () => new Response('ok', { status: 200 }),
   });
@@ -498,6 +502,71 @@ describe('POST /api/chat', () => {
       ];
 
       expect((await POST(request('es', fallido))).status).toBe(200);
+    });
+
+    /**
+     * Ticket 02: la copia del navegador puede no traer el envío —una pestaña
+     * que no lo vio, un cuerpo editado, una recarga temprana—, así que la ruta
+     * le pregunta también a Convex por lo guardado.
+     */
+    describe('aunque el transcript no traiga el envío', () => {
+      test('si continúa una conversación enviada se rechaza igual, sin modelo', async () => {
+        consumeChatRateLimit.mockResolvedValue({ allowed: true });
+        continuesSubmittedConversation.mockResolvedValue(true);
+        const POST = await loadHandler();
+
+        const res = await POST(request('es', HOLA));
+
+        expect(res.status).toBe(409);
+        expect(await res.text()).toContain('Esta conversación ya terminó');
+        expect(streamText).not.toHaveBeenCalled();
+        expect(persistChatTurn).not.toHaveBeenCalled();
+        expect(createReplacementRequest).not.toHaveBeenCalled();
+      });
+
+      /** La identidad sale de Clerk; lo que manda el navegador no la cambia. */
+      test('pregunta por los ids del transcript, con la identidad de Clerk', async () => {
+        consumeChatRateLimit.mockResolvedValue({ allowed: true });
+        const POST = await loadHandler();
+
+        await POST(
+          new Request('http://localhost:3000/api/chat', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              messages: [
+                ...HOLA,
+                { id: 'm2', role: 'user', parts: [{ type: 'text', text: 'y' }] },
+                { role: 'user', parts: [{ type: 'text', text: 'sin id' }] },
+              ],
+              data: { userName: 'Ana', language: 'es', clerkId: 'user_beto' },
+              clerkId: 'user_beto',
+            }),
+          })
+        );
+
+        expect(continuesSubmittedConversation).toHaveBeenCalledWith('user_ana', ['m1', 'm2']);
+      });
+
+      test('un transcript con el envío dentro se rechaza sin preguntar a Convex', async () => {
+        consumeChatRateLimit.mockResolvedValue({ allowed: true });
+        const POST = await loadHandler();
+
+        expect((await POST(request('es', YA_ENVIADO))).status).toBe(409);
+        expect(continuesSubmittedConversation).not.toHaveBeenCalled();
+      });
+
+      test('si Convex no puede contestar, responde 503 y no llama al modelo', async () => {
+        consumeChatRateLimit.mockResolvedValue({ allowed: true });
+        continuesSubmittedConversation.mockRejectedValue(new Error('Convex no responde'));
+        vi.spyOn(console, 'error').mockImplementation(() => {});
+        const POST = await loadHandler();
+
+        const res = await POST(request());
+
+        expect(res.status).toBe(503);
+        expect(streamText).not.toHaveBeenCalled();
+      });
     });
   });
 
