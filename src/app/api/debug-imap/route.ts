@@ -3,7 +3,7 @@ import { ImapFlow } from 'imapflow';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(req: Request) {
+export async function GET() {
   if (process.env.NODE_ENV === 'production') {
     return new Response('Not Found', { status: 404 });
   }
