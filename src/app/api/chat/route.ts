@@ -1,5 +1,4 @@
 import { streamText, tool, convertToModelMessages, type UIMessage, stepCountIs } from 'ai';
-import { google } from '@ai-sdk/google';
 import { auth } from '@clerk/nextjs/server';
 import { z } from 'zod';
 import { Resend } from 'resend';
@@ -10,6 +9,7 @@ import {
   persistChatTurn,
 } from '@/lib/internal-api';
 import { SUPPORT_SENDER } from '@/lib/addresses';
+import { createFailoverModel } from '@/lib/model-failover';
 import { messagesFor, resolveLanguage, type Language } from '@/lib/messages';
 import { findSubmission, toStoredMessages } from '../../../../convex/lib/chat';
 
@@ -113,7 +113,9 @@ INSTRUCCIONES CLAVE Y MANEJO DE ERRORES:
   const coreMessages = await convertToModelMessages(messages as UIMessage[]);
 
   const result = streamText({
-    model: google('gemini-3.1-flash-lite'),
+    // Uno nuevo por petición: si este turno cae a Groq, sus pasos siguientes se
+    // quedan en Groq, y el mensaje siguiente vuelve a probar Gemini (ADR-0003).
+    model: createFailoverModel(),
     system: systemPrompt,
     messages: coreMessages,
     tools: {

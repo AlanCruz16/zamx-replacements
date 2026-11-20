@@ -1,8 +1,8 @@
-import { generateObject } from 'ai';
-import { google } from '@ai-sdk/google';
+import { generateObject, type LanguageModel } from 'ai';
 import { z } from 'zod';
 import { CONFIDENCE_THRESHOLD, type ReplyInterpretation } from '../../convex/lib/reply_verdict';
 import { replyBodyForInterpretation } from './reply-body';
+import { createFailoverModel } from './model-failover';
 import { vocabularyPromptBlock } from './reply-vocabulary';
 
 /**
@@ -94,16 +94,57 @@ Si la intención no es clara, "confidence" debe ser menor a ${CONFIDENCE_THRESHO
 }
 
 /**
+ * Lo que Groq necesita además del prompt de sistema para pasar
+ * `check:vocabulary` (ADR-0003, «Gates»). A Groq se le pide JSON sin esquema
+ * (con el esquema no llenaba nunca `newDeliveryWeeks`; ver `model-failover.ts`),
+ * así que las claves se las dice esta regla; la respuesta se valida igual
+ * contra `interpretationSchema`, que no admite `null` en las opcionales (sin
+ * la última línea, Groq las mandaba en null y la validación lo rechazaba).
+ * Gemini no la recibe: su prompt no cambia por un arreglo de Groq.
+ */
+export const GROQ_INTERPRETER_RULE = `
+Responde sólo con un objeto JSON con estas claves:
+- "classification": uno de "priced_as_suggested", "priced_differently", "oem_restricted",
+  "discontinued", "blocked_pending_info".
+- "confidence": número del 0 al 1.
+- "explanation": resumen breve de la decisión del Approver.
+- "newPricesUSD" (opcional): [{ "partNumber": texto, "price": número }], sólo con cifras nuevas
+  que el Approver escribió. «Mismos precios» quiere decir que no cambian: no lo llenes con los
+  Suggested Prices.
+- "newDeliveryWeeks" (opcional): { "min": número, "max": número }. Obligatorio si el Approver da
+  un plazo, aunque diga «mismos precios»: «de 18 a 22 semanas» => { "min": 18, "max": 22 },
+  «20 semanas» => { "min": 20, "max": 20 }.
+Si una clave opcional no aplica, omítela: nunca escribas null ni una lista vacía.
+`.trim();
+
+/**
+ * El modelo con failover del intérprete: Gemini primero y Groq con su regla.
+ * Uno nuevo por interpretación, para que una caída a Groq no se arrastre a la
+ * respuesta siguiente.
+ */
+export function interpreterFailoverModel() {
+  return createFailoverModel({ groqRule: GROQ_INTERPRETER_RULE });
+}
+
+/**
  * Devuelve la interpretación tal cual la da el modelo, incluida una `confidence`
  * que puede venir fuera de 0–1: acotarla es una regla, y las reglas se aplican
  * en el veredicto, donde hay pruebas que lo comprueban.
+ *
+ * Si ninguno de los dos proveedores contesta, lanza: el correo queda sin leer
+ * y el sondeo siguiente lo reintenta, como siempre.
+ *
+ * `model` existe para que `check:vocabulary` mida cada proveedor por separado
+ * con el mismo prompt (ADR-0003, «Gates»). Quien interpreta de verdad no lo
+ * pasa, y recibe un modelo con failover nuevo en cada llamada.
  */
 export async function interpretApproverReply(
   request: ReplacementRequestContext,
-  replyText: string
+  replyText: string,
+  model: LanguageModel = interpreterFailoverModel()
 ): Promise<ReplyInterpretation> {
   const { object: interpretation } = await generateObject({
-    model: google('gemini-3.1-flash-lite'),
+    model,
     system: interpreterSystemPrompt(request),
     // El cuerpo del correo entra por aquí, como mensaje de usuario, y sólo por
     // aquí — y sin la cadena citada, que no es respuesta de nadie.

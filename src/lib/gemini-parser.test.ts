@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import {
+  GROQ_INTERPRETER_RULE,
   interpretApproverReply,
   interpreterSystemPrompt,
   type ReplacementRequestContext,
@@ -11,10 +12,14 @@ import {
  * dos mensajes viaja el cuerpo.
  */
 
-const { generateObject } = vi.hoisted(() => ({ generateObject: vi.fn() }));
+const { generateObject, createFailoverModel } = vi.hoisted(() => ({
+  generateObject: vi.fn(),
+  // Cada llamada devuelve un objeto distinto, como el módulo real.
+  createFailoverModel: vi.fn((options: unknown) => ({ failover: options })),
+}));
 
 vi.mock('ai', () => ({ generateObject }));
-vi.mock('@ai-sdk/google', () => ({ google: (model: string) => ({ model }) }));
+vi.mock('./model-failover', () => ({ createFailoverModel }));
 
 const REQUEST: ReplacementRequestContext = {
   products: [
@@ -102,6 +107,50 @@ describe('el cuerpo del correo viaja como mensaje de usuario', () => {
       confidence: 1.5,
       explanation: 'Adelante.',
     });
+  });
+});
+
+describe('el modelo que lee', () => {
+  test('lee con el modelo con failover, y Groq con su regla', async () => {
+    // Gemini primero y Groq si Gemini se cae (ADR-0003). La regla es la que
+    // pasó `check:vocabulary`; sin ella Groq pierde el plazo.
+    generateObject.mockResolvedValue({
+      object: { classification: 'priced_as_suggested', confidence: 1, explanation: 'Aprobado.' },
+    });
+
+    await interpretApproverReply(REQUEST, 'Aprobado');
+
+    const [args] = generateObject.mock.calls[0];
+    expect(createFailoverModel).toHaveBeenCalledWith({ groqRule: GROQ_INTERPRETER_RULE });
+    expect(args.model).toBe(createFailoverModel.mock.results[0].value);
+  });
+
+  test('cada interpretación estrena modelo', async () => {
+    // Una caída a Groq no se arrastra a la respuesta siguiente: ésa prueba
+    // Gemini otra vez.
+    generateObject.mockResolvedValue({
+      object: { classification: 'priced_as_suggested', confidence: 1, explanation: 'Aprobado.' },
+    });
+
+    await interpretApproverReply(REQUEST, 'Aprobado');
+    await interpretApproverReply(REQUEST, 'Aprobado');
+
+    const [[first], [second]] = generateObject.mock.calls;
+    expect(createFailoverModel).toHaveBeenCalledTimes(2);
+    expect(first.model).not.toBe(second.model);
+  });
+
+  test('lee con el modelo que se le da', async () => {
+    // Así `check:vocabulary` mide cada proveedor por separado (ticket 03).
+    generateObject.mockResolvedValue({
+      object: { classification: 'priced_as_suggested', confidence: 1, explanation: 'Aprobado.' },
+    });
+    const otro = { model: 'otro' } as never;
+
+    await interpretApproverReply(REQUEST, 'Aprobado', otro);
+
+    const [args] = generateObject.mock.calls[0];
+    expect(args.model).toBe(otro);
   });
 });
 
